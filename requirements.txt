@@ -1,0 +1,6 @@
+torch>=2.15
+transformers>=5.0
+datasets
+accelerate
+matplotlib
+ipykernel        # optional: run lessons cell-by-cell as notebooks

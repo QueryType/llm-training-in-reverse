@@ -1,0 +1,305 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>LLM Training, In Reverse</title>
+<meta name="description" content="Learn how language models are trained by rewinding a real one: start from a chat model, peel off each training stage, then rebuild the pipeline yourself. Fourteen lessons, real runs, laptop-sized.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="tip" id="tip" hidden></div>
+
+<div class="shell">
+<nav class="toc" aria-label="Lessons">
+  <a class="toc-brand" href="#top">LLM Training, In Reverse<span>SmolLM2 · Pythia · your own model · 14 lessons</span></a>
+  <ol id="toc-list">
+    <li><a class="step" href="#l01"><b>01</b><span>Two models, one body</span></a></li>
+    <li><a class="step" href="#l02"><b>02</b><span>What changed</span></a></li>
+    <li><a class="step" href="#l03"><b>03</b><span>Do SFT yourself</span></a></li>
+    <li><a class="step soon" href="#l04"><b>04</b><span>Preferences (DPO)</span></a></li>
+    <li><a class="step soon" href="#l05"><b>05</b><span>Rewind pretraining</span></a></li>
+    <li><a class="step soon" href="#l06"><b>06</b><span>What loss means</span></a></li>
+    <li><a class="step soon" href="#l07"><b>07</b><span>Gradients</span></a></li>
+    <li><a class="step soon" href="#l08"><b>08</b><span>The optimizer</span></a></li>
+    <li><a class="step soon" href="#l09"><b>09</b><span>Learning rate</span></a></li>
+    <li><a class="step soon" href="#l10"><b>10</b><span>Tokenizer &amp; data</span></a></li>
+    <li><a class="step soon" href="#l11"><b>11</b><span>Pretrain your own</span></a></li>
+    <li><a class="step soon" href="#l12"><b>12</b><span>Memory &amp; speed</span></a></li>
+    <li><a class="step soon" href="#l13"><b>13</b><span>Scaling laws</span></a></li>
+    <li><a class="step soon" href="#l14"><b>14</b><span>Make it chat</span></a></li>
+  </ol>
+  <div class="toc-foot">
+    <p>Every number on this page comes from <em>your</em> runs of the lessons, collected by <code>site/build_data.py</code>.</p>
+    <p style="margin-top:.75rem"><button class="theme-btn" id="theme-btn" type="button">Theme: system</button></p>
+  </div>
+</nav>
+
+<main id="top">
+<!-- ===================================================== HERO -->
+<header class="hero bench">
+  <div class="col prose" style="margin:0">
+    <p class="eyebrow">A hands-on course · 14 lessons · runs on a laptop</p>
+    <h1>LLM Training, In Reverse</h1>
+    <p class="lead">Most training tutorials start from a gradient and build up, and you reach the part where the model talks back hours later. This course runs the tape backwards. We start from a finished chat model, undo its training one stage at a time back to a single weight update, and then rebuild the whole pipeline ourselves: a tokenizer, a model pretrained from scratch, and a chat model of our own.</p>
+  </div>
+
+  <div class="specimen">
+    <p class="eyebrow" style="color:var(--hot)">The pipeline, read right to left</p>
+    <div class="specimen-row" style="gap:.35rem">
+      <span class="stage">random weights</span><span class="arrow">→</span>
+      <span class="stage">pretraining <small>05, 11</small></span><span class="arrow">→</span>
+      <span class="stage">base model</span><span class="arrow">→</span>
+      <span class="stage">SFT <small>03</small></span><span class="arrow">→</span>
+      <span class="stage">preferences <small>04</small></span><span class="arrow">→</span>
+      <span class="answer-chip">chat model</span>
+    </div>
+    <p class="caption">Every stage runs the same loop: <b>predict the next token, measure how wrong you were, nudge every weight a little</b>. Only the data and what gets graded change. Part 1 rewinds this pipeline on a real model. Part 2 opens up a single step of that loop. Part 3 builds the pipeline again from zero.</p>
+    <ol class="journey" id="journey">
+      <li><a href="#l01"><b>01</b><span>Same body, different weights</span></a></li>
+      <li><a href="#l02"><b>02</b><span>A 9% edit, aimed precisely</span></a></li>
+      <li><a href="#l03"><b>03</b><span>2 minutes of SFT makes an assistant</span></a></li>
+      <li><a href="#l04"><b>04</b><span>Teach a preference, not an answer</span></a></li>
+      <li><a href="#l05"><b>05</b><span>Watch a model learn, checkpoint by checkpoint</span></a></li>
+      <li><a href="#l06"><b>06</b><span>What the loss number means</span></a></li>
+      <li><a href="#l07"><b>07</b><span>Which way should each weight move?</span></a></li>
+      <li><a href="#l08"><b>08</b><span>AdamW in a few lines</span></a></li>
+      <li><a href="#l09"><b>09</b><span>Too hot, too cold, just right</span></a></li>
+      <li><a href="#l10"><b>10</b><span>Your own tokenizer</span></a></li>
+      <li><a href="#l11"><b>11</b><span>A model that tells stories, in 10 minutes</span></a></li>
+      <li><a href="#l12"><b>12</b><span>Where the memory goes</span></a></li>
+      <li><a href="#l13"><b>13</b><span>Bigger model or more data?</span></a></li>
+      <li><a href="#l14"><b>14</b><span>Your model, chatting</span></a></li>
+    </ol>
+  </div>
+
+  <div class="grid2">
+    <div class="prose">
+      <h3 style="margin:0">How to use this page</h3>
+      <p>Each lesson matches a script in <code>lessons/</code>. Run it, and it saves its numbers; <code>python site/build_data.py</code> then puts them here. Nothing on this page is hand-typed, so if your run came out differently, the page shows <em>your</em> result.</p>
+      <p>Predict before you look. Training is full of surprises, and the surprises are the lesson.</p>
+    </div>
+    <div class="prose">
+      <h3 style="margin:0">What you need</h3>
+      <p>A laptop. Part 1 and 2 run in a few minutes each on a CPU or an Apple Silicon / CUDA GPU. Part 3's pretraining run takes about 10 minutes on an M4 Pro or a modest NVIDIA card. If you've done <a href="https://querytype.github.io/transformers-inside-out/">Transformers, Inside Out</a>, you already know the model; if not, nothing here depends on it.</p>
+    </div>
+  </div>
+</header>
+
+<!-- ===================================================== PART 1 -->
+<div class="col part-head">
+  <p class="eyebrow">Part 1 · lessons 01–05</p>
+  <h2>Rewind a finished model</h2>
+  <p class="question">Start with a chat model and its base model. Undo the training that separates them, then rewind pretraining itself.</p>
+</div>
+
+<!-- ===================================================== 01 -->
+<section class="lesson" id="l01">
+  <div class="col lesson-head">
+    <p class="lesson-num">Lesson 01 · lessons/01_two_models.py</p>
+    <h2>Two models, one body</h2>
+    <p class="question">A base model and its chat version: what is actually different?</p>
+  </div>
+  <div class="col prose">
+    <p><strong>SmolLM2-135M</strong> is a base model: it read trillions of tokens of web text, books and code, and learned to continue documents. <strong>SmolLM2-135M-Instruct</strong> is the same model after a few more rounds of training that turned it into an assistant. Same architecture, same 134.5 million parameters, same tokenizer. Only the numbers inside the weights differ.</p>
+    <p>So the best way to see what that extra training did is to ask both models the same thing, two ways: as plain text, and wrapped in the <em>chat template</em> the instruct model was trained on.</p>
+  </div>
+
+  <div class="bench panel" id="w01-four">
+    <div class="panel-title"><h4>Four ways to ask one question</h4><span class="hint">greedy decoding, 40 tokens</span></div>
+    <div class="seg" id="w01-q"></div>
+    <div class="four" id="w01-grid"></div>
+    <p class="caption">Empty means the model's first token was <code>&lt;|im_end|&gt;</code>: it ended its turn without writing anything.</p>
+  </div>
+
+  <div class="col prose">
+    <p>Three things stand out. The <strong>base model</strong> answers plain questions like a document would: sometimes with an answer, sometimes by writing the next question on the worksheet. The <strong>instruct model</strong> says nothing to a plain question. And inside the template, the instruct model answers properly while the base model falls apart.</p>
+    <p>Why does the instruct model stay silent? Because it has only ever seen questions inside a template. To it, a bare question looks like a finished message, so the most likely next token is "end of turn":</p>
+  </div>
+
+  <div class="bench grid2">
+    <div class="panel">
+      <div class="panel-title"><h4>Instruct, after a plain question</h4><span class="hint">next-token probabilities</span></div>
+      <div class="bars" id="w01-next"></div>
+    </div>
+    <div class="panel">
+      <div class="panel-title"><h4>What the model actually reads</h4><span class="hint" id="w01-ntok"></span></div>
+      <div class="tokrow" id="w01-template"></div>
+      <p class="caption">A "chat" is one string. <span style="color:var(--hot)">Special tokens</span> mark where each turn starts and ends. These tokens already exist in the base vocabulary, and the base model's config is identical apart from their ids.</p>
+    </div>
+  </div>
+
+  <div class="col">
+    <div class="keys">
+      <p class="label">Takeaways</p>
+      <ul>
+        <li>Base and chat models share an architecture; post-training changes only weights.</li>
+        <li>The chat template is just text with special tokens. A chat model depends on it; the base model never learned it.</li>
+        <li>Post-training taught a <em>format</em> (the template) and a <em>role</em> (answer, then stop). Lesson 02 asks: what else did it change?</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ===================================================== 02 -->
+<section class="lesson" id="l02">
+  <div class="col lesson-head">
+    <p class="lesson-num">Lesson 02 · lessons/02_what_changed.py</p>
+    <h2>What did post-training change?</h2>
+    <p class="question">We have both sets of weights. Subtract them: how big is the edit, where is it, and what did it cost?</p>
+  </div>
+  <div class="col prose">
+    <p>Call the difference <code>Δ = W<sub>instruct</sub> − W<sub>base</sub></code>. For each weight matrix, compare the size of the change with the size of the matrix. The <em>size</em> here is just the square root of the sum of all squared numbers.</p>
+  </div>
+
+  <div class="bench panel">
+    <div class="panel-title"><h4>How much each matrix changed</h4><span class="hint" id="w02-global"></span></div>
+    <div class="scroll-x" id="w02-heat"></div>
+    <p class="caption">Rows: the nine kinds of weight in each of the 30 layers. Columns: layers. Darker means a bigger relative change. Hover for the value.</p>
+  </div>
+
+  <div class="col prose">
+    <p>The edit touches every layer, and it is strongest at the very first layer, where tokens are first read in. Is a 9% change big? That depends on its <em>direction</em>. To check, add a <strong>random</strong> change of exactly the same size to the base model, and compare the result with the real one. Perplexity on a paragraph of encyclopedia text tells us whether the model still "knows" ordinary text (lower is better).</p>
+  </div>
+
+  <div class="bench grid2">
+    <div class="panel">
+      <div class="panel-title"><h4>Same size, different direction</h4><span class="hint">perplexity on encyclopedia text</span></div>
+      <div class="bars" id="w02-dir"></div>
+      <p class="caption">The trained edit leaves the knowledge in place and adds a new behaviour. A random edit of the same size nearly doubles perplexity and doesn't chat.</p>
+    </div>
+    <div class="panel">
+      <div class="panel-title"><h4>Dial in the edit</h4><span class="hint">W = W<sub>base</sub> + α·Δ</span></div>
+      <div class="controls"><label>α <input type="range" id="w02-alpha" min="0" max="7" step="1" value="0"><output id="w02-alpha-out"></output></label><span class="muted" id="w02-ppl" style="font:500 .85rem var(--font-mono)"></span></div>
+      <div class="out-box" id="w02-ans"></div>
+      <p class="caption">"What is the capital of France?" in the chat template. α = 0 is the base model, α = 1 is instruct, beyond 1 overshoots.</p>
+    </div>
+  </div>
+
+  <div class="col prose">
+    <p>A small fraction of the edit already flips the model from lost to answering. So what exactly is different in the answers? Let the instruct model write a reply, then ask the <strong>base</strong> model, token by token: what rank would <em>you</em> have given this token?</p>
+  </div>
+
+  <div class="bench panel">
+    <div class="panel-title"><h4>The instruct model's reply, coloured by the base model's opinion</h4><span class="hint">hover a token for its rank</span></div>
+    <div class="seg" id="w02-prompts"></div>
+    <div class="tokrow" id="w02-tokens"></div>
+    <div class="legend-row">
+      <span><span class="tok r0">rank 0</span> base agrees</span>
+      <span><span class="tok r1">1–2</span></span>
+      <span><span class="tok r2">3–9</span></span>
+      <span><span class="tok r3">≥ 10</span> base would not have written this</span>
+    </div>
+    <div class="bars" id="w02-share"></div>
+  </div>
+
+  <div class="col">
+    <div class="keys">
+      <p class="label">Takeaways</p>
+      <ul>
+        <li>Post-training is a small edit (about 9% of the weights' size), aimed very precisely. A random edit of the same size only damages the model.</li>
+        <li>Knowledge survives: perplexity on ordinary text hardly moves.</li>
+        <li>About half of the chat model's tokens are the base model's top choice anyway. The changed ones are mostly the first word, formatting and tone. This is the <em>superficial alignment hypothesis</em> (LIMA, URIAL, 2023).</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ===================================================== 03 -->
+<section class="lesson" id="l03">
+  <div class="col lesson-head">
+    <p class="lesson-num">Lesson 03 · lessons/03_sft.py</p>
+    <h2>Do SFT yourself</h2>
+    <p class="question">How much data and time does it take to turn a base model into an assistant?</p>
+  </div>
+  <div class="col prose">
+    <p><strong>Supervised fine-tuning</strong> is ordinary next-token training with two changes. The data is conversations in the chat template, and only the <em>assistant's</em> tokens are graded. Everything else gets the label <code>-100</code>, which tells PyTorch's loss to skip it. That's all <em>loss masking</em> is.</p>
+  </div>
+
+  <div class="bench panel">
+    <div class="panel-title"><h4>Which tokens get graded?</h4><span class="hint" id="w03-maskstat"></span></div>
+    <div class="tokrow" id="w03-mask"></div>
+    <div class="legend-row"><span><span class="tok graded">graded</span> the model is trained to predict this</span><span><span class="tok ignored">ignored</span> label = −100</span></div>
+  </div>
+
+  <div class="col prose">
+    <p>The whole training loop fits on one screen. Take a batch of conversations, compute the loss on the graded tokens, call <code>backward()</code> to find which way each weight should move, and take a small step. Lessons 07–09 open up each of those three lines.</p>
+<pre class="code"><span class="k">for</span> step <span class="k">in</span> range(STEPS):
+    x, y, att = pad_batch(next_batch(), device)
+    logits = model(x, attention_mask=att).logits
+    loss = F.cross_entropy(logits[:, :-1].flatten(0, 1),   <span class="c"># 1. how wrong are we?</span>
+                           y[:, 1:].flatten(), ignore_index=-100)
+<span class="hl">    loss.backward()                      <span class="c"># 2. which way should each weight move?</span></span>
+<span class="hl">    opt.step(); opt.zero_grad()          <span class="c"># 3. move them a little</span></span></pre>
+  </div>
+
+  <div class="bench panel">
+    <div class="panel-title"><h4>Training curve</h4><span class="hint" id="w03-runinfo"></span></div>
+    <div id="w03-curve"></div>
+    <div class="stats" id="w03-stats"></div>
+  </div>
+
+  <div class="bench panel">
+    <div class="panel-title"><h4>Before and after</h4><span class="hint">our own chat prompt, no system message</span></div>
+    <div class="seg" id="w03-prompts"></div>
+    <div class="pair">
+      <div><p class="lbl">base model</p><div class="out-box" id="w03-before"></div></div>
+      <div><p class="lbl">after SFT</p><div class="out-box" id="w03-after"></div></div>
+    </div>
+    <p class="caption">The first two prompts look like the training data; the last two don't. SFT taught format and role. It can't teach poetry from 2,000 everyday chats.</p>
+  </div>
+
+  <div class="bench grid2">
+    <div class="panel">
+      <div class="panel-title"><h4>What masking did</h4><span class="hint">test loss, before → after</span></div>
+      <div class="bars" id="w03-maskeffect"></div>
+      <p class="caption">All the training signal went to the assistant's side. The model learned to <em>answer</em> users, not to imitate them.</p>
+    </div>
+    <div class="prose" style="align-content:start">
+      <h3 style="margin:0">A warning about test sets</h3>
+      <p>On this test set, our model beats SmolLM2-Instruct, which was trained on about a million varied conversations. Ours specialised on everyday chit-chat; theirs didn't. A low loss on your own test set only tells you about data like your test set.</p>
+    </div>
+  </div>
+
+  <div class="col">
+    <div class="keys">
+      <p class="label">Takeaways</p>
+      <ul>
+        <li>SFT is next-token prediction on conversations, with the loss masked to the assistant's tokens.</li>
+        <li>A few thousand examples and two minutes are enough to teach the format and the role, because the knowledge was already there.</li>
+        <li>SFT copies the <em>style of its data</em>. To teach a model to prefer one answer over another without writing the answers yourself, you need lesson 04.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ===================================================== 04–14 (coming) -->
+<section class="lesson" id="l04"><div class="col lesson-head"><p class="lesson-num">Lesson 04 · lessons/04_dpo.py</p><h2>Preferences: DPO</h2><p class="question">How do you teach a preference instead of an answer?</p></div><div class="col pending">Coming next.</div></section>
+<section class="lesson" id="l05"><div class="col lesson-head"><p class="lesson-num">Lesson 05 · lessons/05_rewind_pretraining.py</p><h2>Rewind pretraining</h2><p class="question">What does a model know at step 0, 1,000, 10,000, 143,000?</p></div><div class="col pending">Coming next.</div></section>
+<div class="col part-head"><p class="eyebrow">Part 2 · lessons 06–09</p><h2>One training step, opened up</h2></div>
+<section class="lesson" id="l06"><div class="col lesson-head"><p class="lesson-num">Lesson 06</p><h2>What does the loss number mean?</h2></div><div class="col pending">Coming next.</div></section>
+<section class="lesson" id="l07"><div class="col lesson-head"><p class="lesson-num">Lesson 07</p><h2>Gradients</h2></div><div class="col pending">Coming next.</div></section>
+<section class="lesson" id="l08"><div class="col lesson-head"><p class="lesson-num">Lesson 08</p><h2>The optimizer</h2></div><div class="col pending">Coming next.</div></section>
+<section class="lesson" id="l09"><div class="col lesson-head"><p class="lesson-num">Lesson 09</p><h2>Learning rate</h2></div><div class="col pending">Coming next.</div></section>
+<div class="col part-head"><p class="eyebrow">Part 3 · lessons 10–14</p><h2>Rebuild it from scratch</h2></div>
+<section class="lesson" id="l10"><div class="col lesson-head"><p class="lesson-num">Lesson 10</p><h2>Tokenizer and data</h2></div><div class="col pending">Coming next.</div></section>
+<section class="lesson" id="l11"><div class="col lesson-head"><p class="lesson-num">Lesson 11</p><h2>Pretrain your own</h2></div><div class="col pending">Coming next.</div></section>
+<section class="lesson" id="l12"><div class="col lesson-head"><p class="lesson-num">Lesson 12</p><h2>Memory and speed</h2></div><div class="col pending">Coming next.</div></section>
+<section class="lesson" id="l13"><div class="col lesson-head"><p class="lesson-num">Lesson 13</p><h2>Scaling laws</h2></div><div class="col pending">Coming next.</div></section>
+<section class="lesson" id="l14"><div class="col lesson-head"><p class="lesson-num">Lesson 14</p><h2>Make it chat</h2></div><div class="col pending">Coming next.</div></section>
+
+<footer class="col prose">
+  <p class="muted">Models: SmolLM2-135M and -Instruct (Apache-2.0), Pythia (Apache-2.0). Data: everyday-conversations, TinyStories. Course code: MIT.</p>
+</footer>
+</main>
+</div>
+
+<script src="data/results.js"></script>
+<script>window.RESULTS = window.RESULTS || {};</script>
+<script src="js/ui.js"></script>
+<script src="js/part1.js"></script>
+</body>
+</html>
