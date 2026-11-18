@@ -275,3 +275,8 @@ footer { padding-block: 4rem 2rem; border-top: 1px solid var(--line); margin-top
   .four .out-box::before { content: attr(data-k); display: block; font: 600 0.7rem var(--font-mono); color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.35rem; }
   .pair { grid-template-columns: minmax(0, 1fr); }
 }
+.bars.wide .bar { grid-template-columns: 12.5rem minmax(0, 1fr) 5.2rem; }
+@media (max-width: 760px) { .bars.wide .bar { grid-template-columns: 9.5rem minmax(0, 1fr) 4.4rem; font-size: 0.78rem; } }
+.lesson > .bench { width: 100%; }
+.panel > *, .panel .grid2 > * { min-width: 0; }
+.out-box { overflow-wrap: anywhere; }

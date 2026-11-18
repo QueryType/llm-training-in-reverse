@@ -58,6 +58,8 @@ print(f"  ‖Δ‖ / ‖W_base‖ = {rel_global:.1%}")
 print(f"  share of weights that moved by less than 0.001: {(flat_d.abs() < 1e-3).float().mean():.1%}")
 print(f"  typical |weight| {flat_b.abs().median():.4f}   typical |change| {flat_d.abs().median():.4f}")
 results["rel_global"] = rel_global
+results["share_tiny"] = (flat_d.abs() < 1e-3).float().mean().item()
+results["median_w"], results["median_d"] = flat_b.abs().median().item(), flat_d.abs().median().item()
 
 # %% [markdown]
 # 8.6%. And it's **dense**: only 7.3% of the weights moved by less than 0.001.
@@ -83,7 +85,8 @@ for n, w in W_base.items():
     kind = next(k for k in KINDS if k in n)
     grid[KINDS.index(kind), layer] = ((W_inst[n] - w).norm() / w.norm()).item()
 for n in ("model.embed_tokens.weight", "model.norm.weight"):
-    print(f"  {n:28} {((W_inst[n] - W_base[n]).norm() / W_base[n].norm()).item():6.1%}")
+    results[n] = ((W_inst[n] - W_base[n]).norm() / W_base[n].norm()).item()
+    print(f"  {n:28} {results[n]:6.1%}")
 top = sorted(((grid[i, j].item(), KINDS[i], j) for i in range(len(KINDS)) for j in range(L)), reverse=True)[:5]
 print("  biggest changes:", ", ".join(f"layer {j} {k} {v:.0%}" for v, k, j in top))
 print(f"  average by layer: first 3 layers {grid[:, :3].mean():.1%}, the rest {grid[:, 3:].mean():.1%}")

@@ -20,8 +20,8 @@
     <li><a class="step" href="#l01"><b>01</b><span>Two models, one body</span></a></li>
     <li><a class="step" href="#l02"><b>02</b><span>What changed</span></a></li>
     <li><a class="step" href="#l03"><b>03</b><span>Do SFT yourself</span></a></li>
-    <li><a class="step soon" href="#l04"><b>04</b><span>Preferences (DPO)</span></a></li>
-    <li><a class="step soon" href="#l05"><b>05</b><span>Rewind pretraining</span></a></li>
+    <li><a class="step" href="#l04"><b>04</b><span>Preferences (DPO)</span></a></li>
+    <li><a class="step" href="#l05"><b>05</b><span>Rewind pretraining</span></a></li>
     <li><a class="step soon" href="#l06"><b>06</b><span>What loss means</span></a></li>
     <li><a class="step soon" href="#l07"><b>07</b><span>Gradients</span></a></li>
     <li><a class="step soon" href="#l08"><b>08</b><span>The optimizer</span></a></li>
@@ -60,10 +60,10 @@
     <p class="caption">Every stage runs the same loop: <b>predict the next token, measure how wrong you were, nudge every weight a little</b>. Only the data and what gets graded change. Part 1 rewinds this pipeline on a real model. Part 2 opens up a single step of that loop. Part 3 builds the pipeline again from zero.</p>
     <ol class="journey" id="journey">
       <li><a href="#l01"><b>01</b><span>Same body, different weights</span></a></li>
-      <li><a href="#l02"><b>02</b><span>A 9% edit, aimed precisely</span></a></li>
+      <li><a href="#l02"><b>02</b><span>An <span data-n="02.rel">8.6%</span> edit, aimed precisely</span></a></li>
       <li><a href="#l03"><b>03</b><span>2 minutes of SFT makes an assistant</span></a></li>
-      <li><a href="#l04"><b>04</b><span>Teach a preference, not an answer</span></a></li>
-      <li><a href="#l05"><b>05</b><span>Watch a model learn, checkpoint by checkpoint</span></a></li>
+      <li><a href="#l04"><b>04</b><span>Longer answers, and a silent cost</span></a></li>
+      <li><a href="#l05"><b>05</b><span>Copying switches on between two checkpoints</span></a></li>
       <li><a href="#l06"><b>06</b><span>What the loss number means</span></a></li>
       <li><a href="#l07"><b>07</b><span>Which way should each weight move?</span></a></li>
       <li><a href="#l08"><b>08</b><span>AdamW in a few lines</span></a></li>
@@ -105,7 +105,8 @@
   </div>
   <div class="col prose">
     <p><strong>SmolLM2-135M</strong> is a base model: it read trillions of tokens of web text, books and code, and learned to continue documents. <strong>SmolLM2-135M-Instruct</strong> is the same model after a few more rounds of training that turned it into an assistant. Same architecture, same 134.5 million parameters, same tokenizer. Only the numbers inside the weights differ.</p>
-    <p>So the best way to see what that extra training did is to ask both models the same thing, two ways: as plain text, and wrapped in the <em>chat template</em> the instruct model was trained on.</p>
+    <p>That's worth checking rather than assuming. The lesson counts the parameters (134,515,008 in both), compares the shape of every tensor (all identical), and diffs the two config files: the only differences are the ids of the "beginning" and "end" tokens. Whatever post-training did, it did by changing the <em>values</em> of weights that were already there.</p>
+    <p>So the best way to see what that extra training did is to ask both models the same thing, two ways: as plain text, and wrapped in the <em>chat template</em> the instruct model was trained on. We use greedy decoding (always take the most likely token) so the differences come from the models, not from chance.</p>
   </div>
 
   <div class="bench panel" id="w01-four">
@@ -116,8 +117,9 @@
   </div>
 
   <div class="col prose">
-    <p>Three things stand out. The <strong>base model</strong> answers plain questions like a document would: sometimes with an answer, sometimes by writing the next question on the worksheet. The <strong>instruct model</strong> says nothing to a plain question. And inside the template, the instruct model answers properly while the base model falls apart.</p>
-    <p>Why does the instruct model stay silent? Because it has only ever seen questions inside a template. To it, a bare question looks like a finished message, so the most likely next token is "end of turn":</p>
+    <p>Three things stand out. The <strong>base model</strong> answers plain questions like a document would. For France it happens to continue with an answer (plus an invented population). For the haiku it writes <code>10) Write an essay on…</code>: to a base model, "Write a haiku about the sea." looks like item 9 on a homework sheet, so the likely next text is item 10. That isn't a bug. A base model was trained to answer one question, <em>what text comes next on a typical web page?</em>, and it answers it well.</p>
+    <p>The <strong>instruct model</strong> says nothing at all to a plain question. And inside the template the roles swap: the instruct model answers properly while the base model falls apart (a legless cave animal for "the capital of France"). Each model only works in the format it was trained on.</p>
+    <p>Why does the instruct model stay silent? Because it has only ever seen questions inside a template, and in every one of them a user's message was followed by <code>&lt;|im_end|&gt;</code>. To it, a bare question looks like a user message that just ended, so the most likely next token is "end of turn". It isn't refusing; it's waiting for the template.</p>
   </div>
 
   <div class="bench grid2">
@@ -132,12 +134,24 @@
     </div>
   </div>
 
+  <div class="col prose">
+    <p>The API's list of <code>{"role", "content"}</code> messages is turned into this string before the model sees anything. Even the system prompt, "You are a helpful AI assistant named SmolLM, trained by Hugging Face", is just 16 tokens of ordinary text that the template adds unless you supply your own. A model's sense of "who am I" is part of its prompt.</p>
+    <p>One more thing post-training has to teach: <strong>when to stop</strong>. Without it, every answer would run until the length limit and the app would have to guess where to cut.</p>
+  </div>
+
+  <div class="bench panel">
+    <div class="panel-title"><h4>Who knows when to stop?</h4><span class="hint">tokens written before <code>&lt;|im_end|&gt;</code>, chat template, up to 120</span></div>
+    <div id="w01-stop"></div>
+    <p class="caption">The base model never stops: <code>&lt;|im_end|&gt;</code> almost never appeared in its training data. The instruct model stops on its own, except on the long list of sleep tips, where it runs out of room. Stopping is a learned habit, and lesson 03 shows how quickly it's learned.</p>
+  </div>
+
   <div class="col">
     <div class="keys">
       <p class="label">Takeaways</p>
       <ul>
         <li>Base and chat models share an architecture; post-training changes only weights.</li>
         <li>The chat template is just text with special tokens. A chat model depends on it; the base model never learned it.</li>
+        <li>Each model behaves well only in its own format: the base model continues documents, the instruct model answers turns.</li>
         <li>Post-training taught a <em>format</em> (the template) and a <em>role</em> (answer, then stop). Lesson 02 asks: what else did it change?</li>
       </ul>
     </div>
@@ -152,7 +166,8 @@
     <p class="question">We have both sets of weights. Subtract them: how big is the edit, where is it, and what did it cost?</p>
   </div>
   <div class="col prose">
-    <p>Call the difference <code>Δ = W<sub>instruct</sub> − W<sub>base</sub></code>. For each weight matrix, compare the size of the change with the size of the matrix. The <em>size</em> here is just the square root of the sum of all squared numbers.</p>
+    <p>Normally you only get the finished chat model. SmolLM2 publishes both ends of post-training, so we can see <em>exactly</em> what SFT and preference tuning did, summed into one number per weight. Call the difference <code>Δ = W<sub>instruct</sub> − W<sub>base</sub></code>.</p>
+    <p>For each weight matrix, compare the size of the change with the size of the matrix. The <em>size</em> here is just the square root of the sum of all squared numbers. Relative, because a change of 0.01 is huge for a weight of 0.001 and noise for a weight of 10.</p>
   </div>
 
   <div class="bench panel">
@@ -162,25 +177,29 @@
   </div>
 
   <div class="col prose">
-    <p>The edit touches every layer, and it is strongest at the very first layer, where tokens are first read in. Is a 9% change big? That depends on its <em>direction</em>. To check, add a <strong>random</strong> change of exactly the same size to the base model, and compare the result with the real one. Perplexity on a paragraph of encyclopedia text tells us whether the model still "knows" ordinary text (lower is better).</p>
+    <p>The edit is <strong>dense</strong>: only <span data-n="02.tiny">7.3%</span> of the weights moved by less than 0.001. A typical weight is about <span data-n="02.medw">0.107</span> and a typical change about <span data-n="02.medd">0.010</span>, so almost every one of the 134.5 million numbers was nudged by roughly a tenth of its size. Post-training didn't find "the chat neurons" and rewrite them. It moved everything a little.</p>
+    <p>Two patterns stand out in the map. <strong>Layer 0 moved most</strong>: its value projection by <span data-n="02.v0">33%</span>, the norm in front of it by <span data-n="02.n0">32%</span>. That's where tokens are first read, and the chat template is full of tokens the base model barely used. The token embeddings moved by <span data-n="02.embed">11.7%</span>, more than the average matrix, for the same reason. And <strong>queries and keys move more with depth</strong>, about 4–7% in the first layers and 11–12% in the last ones: late attention decides which earlier words to use for the next one, and a new role plausibly needs new choices there. (Plausibly: the map shows where, not why.)</p>
+    <p>Is a <span data-n="02.rel">8.6%</span> change big? That depends on its <em>direction</em>. To check, add a <strong>random</strong> change of exactly the same size to the base model, and compare the result with the real one. Perplexity on a paragraph of encyclopedia text tells us whether the model still "knows" ordinary text (lower is better; lesson 06 explains the unit).</p>
   </div>
 
   <div class="bench grid2">
     <div class="panel">
       <div class="panel-title"><h4>Same size, different direction</h4><span class="hint">perplexity on encyclopedia text</span></div>
       <div class="bars" id="w02-dir"></div>
-      <p class="caption">The trained edit leaves the knowledge in place and adds a new behaviour. A random edit of the same size nearly doubles perplexity and doesn't chat.</p>
+      <p class="caption">The trained edit leaves the knowledge in place and adds a new behaviour. A random edit of the same size nearly doubles perplexity and doesn't chat; even a quarter of it costs as much as the whole trained edit. In 134.5 million dimensions almost every direction is harmful, and training found one of the few that help.</p>
     </div>
     <div class="panel">
       <div class="panel-title"><h4>Dial in the edit</h4><span class="hint">W = W<sub>base</sub> + α·Δ</span></div>
       <div class="controls"><label>α <input type="range" id="w02-alpha" min="0" max="7" step="1" value="0"><output id="w02-alpha-out"></output></label><span class="muted" id="w02-ppl" style="font:500 .85rem var(--font-mono)"></span></div>
       <div class="out-box" id="w02-ans"></div>
-      <p class="caption">"What is the capital of France?" in the chat template. α = 0 is the base model, α = 1 is instruct, beyond 1 overshoots.</p>
+      <div id="w02-alpha-ppl"></div>
+      <p class="caption">"What is the capital of France?" in the chat template. α = 0 is the base model, α = 1 is instruct, beyond 1 overshoots. The small chart is perplexity on encyclopedia text along the way.</p>
     </div>
   </div>
 
   <div class="col prose">
-    <p>A small fraction of the edit already flips the model from lost to answering. So what exactly is different in the answers? Let the instruct model write a reply, then ask the <strong>base</strong> model, token by token: what rank would <em>you</em> have given this token?</p>
+    <p>At α = 0.2, a fifth of the edit, the model already answers "The capital city of France is Paris". The rest of the way mostly changes the style. Watch the perplexity, too: it <em>drops</em> below the base model's between α = 0.1 and 0.75, then rises to <span data-n="02.ppl_inst">6.01</span> at α = 1. Part of the edit makes the model better at ordinary text, and the last stretch trades a little of that for chat style. Some forgetting does happen; it's just small. Overshooting to 1.25 hurts both.</p>
+    <p>So what exactly is different in the answers? Let the instruct model write a reply, then ask the <strong>base</strong> model, token by token: what rank would <em>you</em> have given this token? If post-training had rewritten the knowledge, the base model would disagree everywhere. If it changed the style, the disagreements should cluster.</p>
   </div>
 
   <div class="bench panel">
@@ -196,12 +215,17 @@
     <div class="bars" id="w02-share"></div>
   </div>
 
+  <div class="col prose">
+    <p>They cluster. The tokens the base model would never have written are the <strong>opening word</strong> ("Absolutely" is rank 1,189 for the base model, "Here" 28), <strong>formatting</strong> (the "1" that starts a list, "**" for bold) and a few words that set the tone. Once the instruct model has written <code>Here's my advice:↵↵1. **</code>, the base model happily predicts much of the rest itself.</p>
+    <p>Even " Paris" is only rank 22 for the base model. That isn't missing knowledge: the base model said Paris to the plain question in lesson 01. Inside the chat template, it just has no idea a capital is being asked for.</p>
+  </div>
+
   <div class="col">
     <div class="keys">
       <p class="label">Takeaways</p>
       <ul>
-        <li>Post-training is a small edit (about 9% of the weights' size), aimed very precisely. A random edit of the same size only damages the model.</li>
-        <li>Knowledge survives: perplexity on ordinary text hardly moves.</li>
+        <li>Post-training is a small, dense edit (<span data-n="02.rel">8.6%</span> of the weights' size), aimed very precisely. A random edit of the same size only damages the model.</li>
+        <li>Knowledge survives: perplexity on ordinary text hardly moves. A fifth of the edit is enough to switch roles.</li>
         <li>About half of the chat model's tokens are the base model's top choice anyway. The changed ones are mostly the first word, formatting and tone. This is the <em>superficial alignment hypothesis</em> (LIMA, URIAL, 2023).</li>
       </ul>
     </div>
@@ -216,7 +240,8 @@
     <p class="question">How much data and time does it take to turn a base model into an assistant?</p>
   </div>
   <div class="col prose">
-    <p><strong>Supervised fine-tuning</strong> is ordinary next-token training with two changes. The data is conversations in the chat template, and only the <em>assistant's</em> tokens are graded. Everything else gets the label <code>-100</code>, which tells PyTorch's loss to skip it. That's all <em>loss masking</em> is.</p>
+    <p><strong>Supervised fine-tuning</strong> is ordinary next-token training with two changes. The data is conversations in the chat template, and only the <em>assistant's</em> tokens are graded. Everything else gets the label <code>-100</code>, which tells PyTorch's loss to skip it. That's all <em>loss masking</em> is. "Supervised" just means every example comes with the right answer: someone wrote what the assistant should say.</p>
+    <p>Our data: 2,260 short everyday conversations from the SmolLM2 team (greetings, budgeting, cooking, travel; no code, no maths, no poems), 119 more held out for testing. We start from the base model and train for about two minutes.</p>
   </div>
 
   <div class="bench panel">
@@ -226,7 +251,11 @@
   </div>
 
   <div class="col prose">
-    <p>The whole training loop fits on one screen. Take a batch of conversations, compute the loss on the graded tokens, call <code>backward()</code> to find which way each weight should move, and take a small step. Lessons 07–09 open up each of those three lines.</p>
+    <p>Look at what <em>is</em> graded: the assistant's words <strong>and</strong> the <code>&lt;|im_end|&gt;</code> after them. That one token is how the model learns to stop. The header <code>&lt;|im_start|&gt;assistant</code> is not graded: at inference time we write it ourselves. And there's no system prompt; our models are trained without one, so we prompt them without one too.</p>
+  </div>
+
+  <div class="col prose">
+    <p>The whole training loop fits on one screen. Take a batch of conversations, compute the loss on the graded tokens, call <code>backward()</code> to find which way each weight should move, and take a small step. The loss is <em>cross-entropy</em>: minus the log of the probability the model gave the real next token (100% → 0, 1% → 4.6), averaged over graded positions. Lessons 06–09 open up each of those lines.</p>
 <pre class="code"><span class="k">for</span> step <span class="k">in</span> range(STEPS):
     x, y, att = pad_batch(next_batch(), device)
     logits = model(x, attention_mask=att).logits
@@ -242,6 +271,10 @@
     <div class="stats" id="w03-stats"></div>
   </div>
 
+  <div class="col prose">
+    <p>Most of the drop happens in the first 50 steps; the next 150 only polish it. Learning a format is fast; it's the first thing a model picks up. And 200 steps × 8 is fewer conversations than the dataset holds: the model hasn't seen all of them even once.</p>
+  </div>
+
   <div class="bench panel">
     <div class="panel-title"><h4>Before and after</h4><span class="hint">our own chat prompt, no system message</span></div>
     <div class="seg" id="w03-prompts"></div>
@@ -252,6 +285,11 @@
     <p class="caption">The first two prompts look like the training data; the last two don't. SFT taught format and role. It can't teach poetry from 2,000 everyday chats.</p>
   </div>
 
+  <div class="col prose">
+    <p>Before training, the base model writes the <em>user's</em> next message ("what is the best way to get rid of a bad smell in my house"): even inside the template it doesn't know which side it's on. After, it answers. France comes out right, a fact no training conversation taught; it was in the base model all along. The haiku fails, and the model asks you about the ocean instead.</p>
+    <p>And the book question gets "Hello! How can I help you today?": polite, right role, no book. That exact sentence is the assistant's first reply in <strong>2,248 of the 2,260</strong> training conversations. SFT copies the habits of its data, good and bad.</p>
+  </div>
+
   <div class="bench grid2">
     <div class="panel">
       <div class="panel-title"><h4>What masking did</h4><span class="hint">test loss, before → after</span></div>
@@ -260,7 +298,8 @@
     </div>
     <div class="prose" style="align-content:start">
       <h3 style="margin:0">A warning about test sets</h3>
-      <p>On this test set, our model beats SmolLM2-Instruct, which was trained on about a million varied conversations. Ours specialised on everyday chit-chat; theirs didn't. A low loss on your own test set only tells you about data like your test set.</p>
+      <p>On this test set, our two-minute model beats SmolLM2-Instruct, which was trained on far more varied conversations and then preference-tuned. Ours specialised on everyday chit-chat; theirs didn't. A low loss on your own test set only tells you about data like your test set. The haiku is the proof.</p>
+      <p>The masking check is also a sanity check: if a bug had let user tokens into the loss, the user loss would have dropped too.</p>
     </div>
   </div>
 
@@ -269,7 +308,7 @@
       <p class="label">Takeaways</p>
       <ul>
         <li>SFT is next-token prediction on conversations, with the loss masked to the assistant's tokens.</li>
-        <li>A few thousand examples and two minutes are enough to teach the format and the role, because the knowledge was already there.</li>
+        <li>A few thousand examples and two minutes are enough to teach the format and the role, because the knowledge was already there. Most of it is learned in the first 50 steps.</li>
         <li>SFT copies the <em>style of its data</em>. To teach a model to prefer one answer over another without writing the answers yourself, you need lesson 04.</li>
       </ul>
     </div>
@@ -277,8 +316,173 @@
 </section>
 
 <!-- ===================================================== 04–14 (coming) -->
-<section class="lesson" id="l04"><div class="col lesson-head"><p class="lesson-num">Lesson 04 · lessons/04_dpo.py</p><h2>Preferences: DPO</h2><p class="question">How do you teach a preference instead of an answer?</p></div><div class="col pending">Coming next.</div></section>
-<section class="lesson" id="l05"><div class="col lesson-head"><p class="lesson-num">Lesson 05 · lessons/05_rewind_pretraining.py</p><h2>Rewind pretraining</h2><p class="question">What does a model know at step 0, 1,000, 10,000, 143,000?</p></div><div class="col pending">Coming next.</div></section>
+<!-- ===================================================== 04 -->
+<section class="lesson" id="l04">
+  <div class="col lesson-head">
+    <p class="lesson-num">Lesson 04 · lessons/04_dpo.py</p>
+    <h2>Teach a preference, not an answer</h2>
+    <p class="question">With no correct answers at all, only "this one is better than that one", can you change how a model behaves? What does it cost?</p>
+  </div>
+  <div class="col prose">
+    <p>SFT copies demonstrations: "here is the answer, write this". Often you don't have perfect answers, but you can easily say <strong>which of two answers is better</strong>. That's preference tuning. The production recipe used to be RLHF: train a reward model on human comparisons, then run reinforcement learning (PPO) against it. <strong>DPO</strong> (Direct Preference Optimization, 2023) gets the same effect with one loss function and no reward model.</p>
+    <p>Our toy preference: <strong>longer answers are better.</strong> Not because it's a good preference (it isn't), but because we can check it with <code>len()</code>. The algorithm never knows what a preference <em>means</em>; it only sees pairs labelled "this over that". A preference we can measure exactly is the best way to watch the algorithm itself.</p>
+    <p>We sample two answers per prompt from our own SFT model from lesson 03, call the longer one <em>chosen</em> and the shorter one <em>rejected</em>, and keep the pairs where both answers finished and the lengths differ by at least 8 tokens. No human labels, no new data. The model only ever chooses between things it already says.</p>
+  </div>
+
+  <div class="bench grid2">
+    <div class="panel">
+      <div class="panel-title"><h4>Preference pairs</h4><span class="hint" id="w04-npairs"></span></div>
+      <div class="seg" id="w04-pairsel"></div>
+      <p class="lbl muted" id="w04-prompt" style="font:500 .9rem var(--font-body)"></p>
+      <div class="pair">
+        <div><p class="lbl" style="color:var(--good)" id="w04-clab">chosen</p><div class="out-box" id="w04-chosen"></div></div>
+        <div><p class="lbl" style="color:var(--bad)" id="w04-rlab">rejected</p><div class="out-box" id="w04-rejected"></div></div>
+      </div>
+      <p class="caption">Longer isn't better. The label only measures length, and the model will learn exactly that.</p>
+    </div>
+    <div class="panel">
+      <div class="panel-title"><h4>Answer lengths in the pairs</h4><span class="hint">tokens</span></div>
+      <div id="w04-hist"></div>
+      <p class="caption" id="w04-histcap"></p>
+    </div>
+  </div>
+
+  <div class="col prose">
+    <h3>The loss, in five lines</h3>
+    <p>Keep a frozen copy of the starting model: the <strong>reference</strong>. Score each answer by the sum of its tokens' log-probabilities (prompt masked, as in lesson 03), under the model being trained (π) and under the reference. The <em>implicit reward</em> of an answer is how much more likely the policy finds it than the reference does, and the loss pushes the chosen answer's reward above the rejected one's:</p>
+    <div class="formula">r(answer) = β · ( log π(answer) − log π_ref(answer) )
+loss      = −log σ( r(chosen) − r(rejected) )</div>
+    <p>Where does that come from? RLHF maximises "reward minus a penalty for drifting from the reference". The DPO paper showed that the best policy for that objective has a closed form, and turned it around: the reward is then β·log(π/π_ref), up to a constant that cancels when you compare two answers to the same prompt. So you can fit the policy directly on the pairs. The reference <em>is</em> the penalty.</p>
+    <p><strong>β is the leash.</strong> With a small β, the loss stays high until the policy has moved far from the reference. With a large β, small moves are enough. At step 0 the policy equals the reference, both rewards are 0, and the loss is exactly log 2 ≈ 0.693.</p>
+    <p>We train twice on the same pairs: once with a sensible leash (β = 0.1), and once <em>pulled hard</em> (β = 0.01, four times the learning rate, two epochs), to see what over-optimising looks like.</p>
+  </div>
+
+  <div class="bench panel">
+    <div class="panel-title"><h4>What happened to the training pairs</h4><span class="hint">log π − log π<sub>ref</sub>, averaged over each batch (smoothed)</span></div>
+    <div id="w04-dlogp"></div>
+    <p class="caption">DPO only rewards the <em>gap</em> between chosen and rejected. Watch the signs: in both runs, <strong>both</strong> lines go down. The cheapest way to open the gap is to make short answers much less likely, not to make long answers more likely. Pulled hard, everything falls.</p>
+  </div>
+
+  <div class="bench grid2">
+    <div class="panel">
+      <div class="panel-title"><h4>The behaviour we asked for</h4><span class="hint">greedy answer length, held-out prompts</span></div>
+      <div id="w04-len"></div>
+    </div>
+    <div class="panel">
+      <div class="panel-title"><h4>The cost</h4><span class="hint">lesson 03's test loss (normal conversations)</span></div>
+      <div id="w04-loss"></div>
+    </div>
+  </div>
+
+  <div class="col prose">
+    <p>With the short leash, answers grow from about <span data-n="04.len0">33</span> to <span data-n="04.len1">59</span> tokens on prompts the model never trained on, and they still stop by themselves. The cost is a small rise in lesson 03's test loss: the model is now a little worse at the plain, short conversations it was trained on. That's the trade preference tuning always makes.</p>
+    <p>Pulled hard, the test loss <strong>triples</strong>. You'd expect the answers to be a mess. Read them:</p>
+  </div>
+
+  <div class="bench panel">
+    <div class="panel-title"><h4>Same held-out prompt, three models</h4><span class="hint">greedy decoding</span></div>
+    <div class="seg" id="w04-evalsel"></div>
+    <div class="grid3" id="w04-three"></div>
+  </div>
+
+  <div class="bench panel">
+    <div class="panel-title"><h4>The scoreboard</h4><span class="hint">48 held-out prompts</span></div>
+    <div class="scroll-x"><table class="data" id="w04-table"></table></div>
+  </div>
+
+  <div class="col prose">
+    <p>Our first draft of this lesson predicted the pulled-hard model would ramble, loop, or never stop. It doesn't. Its answers stop, read well, and aren't much longer than the sensible run's. Repetition barely moves. Every sample you'd read looks fine.</p>
+    <p>The damage is in the probabilities of everything the model <em>doesn't</em> say. Its test loss is now far worse than the base model's was before any SFT; its own chosen answers are much less likely than before training. It has moved into a narrow corner of its own while still winning on the training pairs. That's <strong>over-optimisation</strong>: it rarely shows in a handful of samples, and clearly shows in held-out measurements.</p>
+    <p>Real preference data has the same length trap: human raters tend to prefer longer answers. It's one reason chat models are so wordy, and one reason β and the reference model matter.</p>
+  </div>
+
+  <div class="col">
+    <div class="keys">
+      <p class="label">Takeaways</p>
+      <ul>
+        <li>Preference tuning learns from pairs ("this over that") with no correct answer anywhere. DPO does it with one loss and a frozen reference model.</li>
+        <li>It learns exactly what the labels measure. We measured length and got length, not quality.</li>
+        <li>It has a cost on everything else. Pulled hard, it over-optimises silently: the samples look fine and the held-out loss triples. Always measure on held-out data.</li>
+        <li>That's the end of post-training. The facts, the grammar, the ability to write a sentence at all came from the base model. Lesson 05 rewinds into pretraining.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ===================================================== 05 -->
+<section class="lesson" id="l05">
+  <div class="col lesson-head">
+    <p class="lesson-num">Lesson 05 · lessons/05_rewind_pretraining.py</p>
+    <h2>Rewind pretraining</h2>
+    <p class="question">What does a model know at step 0, 128, 1,000, 143,000? In what order do skills appear, and does anything happen suddenly?</p>
+  </div>
+  <div class="col prose">
+    <p>Everything left after post-training came from <strong>pretraining</strong>: next-token prediction on a huge pile of text, starting from random weights. We can't rewind SmolLM2's pretraining, because only its final weights were published. But EleutherAI's <strong>Pythia</strong> models were released with 154 checkpoints saved during training, and every Pythia model saw the same data in the same order. We take <strong>Pythia-70m</strong> (trained on 300B tokens of The Pile) and load it at 11 moments of its life.</p>
+    <p>On every checkpoint we run the same five probes: the <strong>loss</strong> on held-out WikiText (in nats per token: lower is better, and a uniform guess scores ln V ≈ 10.8); greedy <strong>completions</strong> of three prompts; the probability of the right next token for ten simple <strong>facts</strong>; <strong>copying</strong>, a passage shown twice, where a model that can look back gets the second copy almost free; and <strong>variety</strong>, how many different tokens it ever predicts as its top choice.</p>
+  </div>
+
+  <div class="bench panel" id="w05">
+    <div class="panel-title"><h4>Scrub through training</h4><span class="hint" id="w05-when"></span></div>
+    <div class="controls"><label>checkpoint <input type="range" id="w05-step" min="0" max="10" step="1" value="0" style="width:min(16rem, 48vw)"><output id="w05-step-out"></output></label></div>
+    <div id="w05-losschart"></div>
+    <div class="grid2">
+      <div style="display:grid;gap:.6rem;align-content:start">
+        <p class="lbl muted" style="font:600 .75rem var(--font-mono);text-transform:uppercase;letter-spacing:.05em">greedy completions</p>
+        <div id="w05-comps" style="display:grid;gap:.5rem"></div>
+      </div>
+      <div style="display:grid;gap:.6rem;align-content:start">
+        <p class="lbl muted" style="font:600 .75rem var(--font-mono);text-transform:uppercase;letter-spacing:.05em">P(right next token)</p>
+        <div class="bars wide" id="w05-facts"></div>
+      </div>
+    </div>
+    <div class="stats" id="w05-stats"></div>
+    <p class="caption">Drag the slider, or hover the chart. The x-axis is <em>tokens seen</em> on a log scale, because the interesting part happens early: Pythia's first checkpoints are spaced 1, 2, 4 … 512 steps apart, then every 1,000. Step 0 is drawn at the left edge.</p>
+  </div>
+
+  <div class="col prose">
+    <p>Scrub from left to right and the skills arrive in order:</p>
+    <ul>
+      <li><strong>Step 0:</strong> random weights. Random tokens out; loss a little above ln V.</li>
+      <li><strong>Step 128:</strong> it has learned <em>which tokens are common</em>, and nothing else. It writes "the the the". The random model predicted <span data-n="05.v0">990</span> different top tokens; this one only <span data-n="05.v128">40</span>. Learning starts by <em>collapsing</em> onto the most common tokens.</li>
+      <li><strong>256–512:</strong> short phrases ("a little", "the first of"), in loops.</li>
+      <li><strong>512 → 1,000:</strong> copying switches on, and grammar follows.</li>
+      <li><strong>After that:</strong> facts, slowly, roughly in order of how often they appear in text. "The United States of → America" is there by step 1,000. "Paris" never arrives: a 70M model is too small to store it, even after 300B tokens.</li>
+    </ul>
+    <p>Two things about the facts are worth a second look. Knowledge <strong>flickers</strong>: "America" is at 79% at step 4,000, 5% at step 8,000, and back to 83% at 16,000. A checkpoint is a snapshot of a process that is still moving. And the France completion circles the answer without landing: "the capital of the capital" → "the capital of France, and the capital of France is…" → "the capital of the city of Paris" → back to "the capital of the country".</p>
+  </div>
+
+  <div class="bench grid2">
+    <div class="panel">
+      <div class="panel-title"><h4>Copying from context</h4><span class="hint">loss on a passage, 1st vs 2nd time</span></div>
+      <div id="w05-copy"></div>
+      <p class="caption" id="w05-copycap"></p>
+    </div>
+    <div class="panel">
+      <div class="panel-title"><h4>Variety</h4><span class="hint">distinct top-1 predictions on 4,096 positions</span></div>
+      <div id="w05-variety"></div>
+      <p class="caption">Random noise is varied. Training first collapses onto " the", "," and "." and only slowly opens up again.</p>
+    </div>
+  </div>
+
+  <div class="col prose">
+    <p>Copying doesn't fade in. It appears between two neighbouring checkpoints: on real text, the second copy of a passage costs <span data-n="05.c512">6.5</span> nats at step 512 and <span data-n="05.c1k">2.0</span> at step 1,000. Nothing else on the page moves that much in one gap. This is the <em>induction head phase change</em> (Olsson et al., 2022): attention heads that look for "the last time this token appeared, and what came after it". <a href="https://querytype.github.io/transformers-inside-out/">Transformers, Inside Out</a> lesson 07 finds them inside a finished model.</p>
+    <p>Most of the loss drop happens almost immediately. By step 1,000, 0.7% of training, the loss has fallen <span data-n="05.frac">85%</span> of the way from where it started to where it ends. The other 99.3% of the compute buys the last nat, and that's where the knowledge lives.</p>
+    <p><strong>A surprise:</strong> look at the dashed lines, copying <em>random</em> tokens (which can only be predicted by copying). It works best around steps 2,000–4,000 and then gets <strong>worse</strong>. By the end, even the first copy, which nobody can predict, costs more than twice the uniform guess: the model has become very sure about what comes next, and applies that confidence to noise too. Real-text copying stays fine. Don't assume more training improves every ability; measure the ones you care about.</p>
+  </div>
+
+  <div class="col">
+    <div class="keys">
+      <p class="label">Takeaways</p>
+      <ul>
+        <li>Pretraining builds skills in a fixed order: token frequencies → phrases → copying from context → grammar → common facts → rarer facts. Fluency comes long before knowledge.</li>
+        <li>Most of the loss drop happens in the first 1% of training; knowledge lives in the long tail.</li>
+        <li>Some abilities switch on suddenly, some flicker, and some get worse.</li>
+        <li>Everything in Part 1 was measured with one number, the loss. What does 4.2 nats per token actually mean? Part 2 opens up the training step, starting there.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
 <div class="col part-head"><p class="eyebrow">Part 2 · lessons 06–09</p><h2>One training step, opened up</h2></div>
 <section class="lesson" id="l06"><div class="col lesson-head"><p class="lesson-num">Lesson 06</p><h2>What does the loss number mean?</h2></div><div class="col pending">Coming next.</div></section>
 <section class="lesson" id="l07"><div class="col lesson-head"><p class="lesson-num">Lesson 07</p><h2>Gradients</h2></div><div class="col pending">Coming next.</div></section>

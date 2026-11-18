@@ -38,7 +38,9 @@ Handoff notes between working sessions. Not part of the course itself; delete be
 - [x] **Lessons 01–03 `.py`**: expand the markdown cells (more explanation, intuition, links between lessons)
 - [ ] **Lessons 04–14 + addendum `.py`**: review/expand markdown; make sure every stated number
       matches the latest results JSON (see "Key results" below; re-check them)
-- [ ] **Site Part 1**: expand 01–03 sections; write 04 (DPO) and 05 (Pythia) sections + widgets → show user
+      - [x] 04, 05 done (2026-11-18)   - [ ] 06–14, addendum
+- [x] **Site Part 1**: expand 01–03 sections; write 04 (DPO) and 05 (Pythia) sections + widgets
+      (checked desktop + 390px) → **waiting for user feedback before Part 2**
 - [ ] **Site Part 2**: 06–09 sections + widgets
 - [ ] **Site Part 3**: 10–14 sections + widgets; MLX addendum section
 - [ ] Update hero journey one-liners with measured facts; remove "soon" classes in the TOC
@@ -86,6 +88,13 @@ Handoff notes between working sessions. Not part of the course itself; delete be
 - 14: words used 7%→35%, stops 0%→95%; dialogue metric on only 30 prompts is noise (moved ±15 between runs)
 - MLX: same function (max logit diff 2.7e-5, 100% top-1); 1.16–1.23× faster than PyTorch MPS; lower loss at same step,
   *hypothesis* = different init (left as a Try)
+
+## Site conventions (added in the writing pass)
+- Numbers in prose: `<span data-n="05.c1k">2.0</span>`; the lesson's JS block fills `N["05.c1k"]` from results,
+  the text inside is only a fallback. Add the key in the widget JS when you quote a new number.
+- Half-width charts: pass `width: 460` to `xy()`/`chart()` or the text renders tiny.
+- Bar labels that are prose (not tokens): use `labelNode: [document.createTextNode(...)]`, else spaces show as `·`.
+- Lesson 02 now also saves share_tiny, median_w/median_d, embed/norm relative change (re-run done).
 
 ## Gotchas found along the way
 - Base tokenizer has no chat template; `chat_tokenizer()` borrows Instruct's. Our own SFT models use `our_chat_prompt` (no system prompt).
