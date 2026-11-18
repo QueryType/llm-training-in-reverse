@@ -10,8 +10,21 @@
 # checkpoints* saved during training. We take Pythia-70m (70M parameters,
 # trained on 300B tokens of "The Pile") and load it at 11 moments of its life.
 #
+# Pythia was built for exactly this kind of study. Every model in the family
+# saw the same data in the same order, and the checkpoints are on the
+# Hugging Face Hub as git revisions (`revision="step1000"`), so loading the
+# model at a moment in its past is one argument to `from_pretrained`. The
+# early checkpoints are spaced in powers of two (1, 2, 4, … 512), then every
+# 1,000 steps; that's why our list looks uneven, and why we plot against
+# **log** tokens.
+#
 # Questions: **what does a model know at step 0, 128, 1,000, 143,000? In what
 # order do skills appear? And does anything happen suddenly?**
+#
+# Pythia-70m is not SmolLM2: different data, different tokenizer, half the
+# size. But pretraining is the same process for both, and this is the only
+# way to watch it without paying for it. (In lesson 11 we run our own, small
+# pretraining and watch it live.)
 
 # %%
 import os, sys
@@ -53,6 +66,15 @@ print(f"  the last checkpoint has seen {143000 * TOKENS_PER_STEP / 1e9:.0f}B tok
 #    Out* lesson 07 found the "induction heads" that do this. We test it on real
 #    text, and on random tokens (which can *only* be predicted by copying).
 # 5. **Variety**: how many *different* tokens does it ever predict as its top choice?
+#
+# Each probe looks for one skill. Loss is the overall score. Completions are
+# what you'd see by eye. Facts test stored knowledge, and copying tests the
+# ability to *use the context* instead of memory. Variety catches the
+# degenerate "always say ' the'" phase that a loss number alone hides.
+#
+# "Nats per token" is the average of −ln P(the real next token). Lower is
+# better; 0 would be perfect. Lesson 06 is all about this unit. For now: a
+# model that guesses uniformly among V tokens scores ln V, here about 10.8.
 
 # %%
 wiki = "\n".join(load_dataset("Salesforce/wikitext", "wikitext-2-raw-v1", split="test")["text"])
@@ -129,6 +151,27 @@ for step in STEPS:
 #   8,000, and back to 83% at step 16,000. A checkpoint is a snapshot of a
 #   process that is still moving.
 #
+# A few more things to read in that output:
+#
+# * **The random model has more variety than the trained ones.** At step 0
+#   its top-1 predictions on 4,096 positions cover 990 different tokens (it's
+#   noise), at step 128 only **40** (" the" alone is 26% of them). Learning
+#   starts by *collapsing* onto the most common tokens and then slowly opens
+#   up again (638 at step 1,000, ~750 from step 4,000 on).
+# * **The copy jump in numbers**: on real text, the second copy of a passage
+#   costs 6.53 nats at step 512 and **1.99** at step 1,000 (the first copy:
+#   6.85 and 6.07). On random tokens, 12.61 → **3.34**. Nothing else in the
+#   table moves that much between two neighbouring checkpoints.
+# * **Completions are a slow story.** "The capital of France is" → "the the
+#   the" (128) → "the first of the first" (512) → "the capital of the capital"
+#   (1,000) → "the capital of France, and the capital of France is the capital
+#   of France" (4,000) → "the capital of the city of Paris" (64,000) → "the
+#   capital of the country" (the end). It circles the shape of the answer,
+#   and "Paris" as the *next* token never gets above 0.2%. For code: `print(print(print(` at step 1,000, a real
+#   `return fibonacci(n)` at 64,000.
+# * **The last 79,000 steps barely move the loss**: 4.19 at step 64,000, 4.21
+#   at the end. On this text, the model had mostly stopped improving.
+#
 # ## The picture
 
 # %%
@@ -169,6 +212,28 @@ show_fig(fig, "05_rewind")
 # late in training (one line of work: Godey et al., 2024, "Why do small
 # language models underperform?"). Don't assume "more training" improves every
 # ability; measure the ones you care about.
+#
+# Note that even the *first* copy of the random passage, which nobody can
+# predict, costs 23.9 nats at the end, more than twice the uniform 10.8.
+# A well-calibrated model would say "I don't know" (spread its probability
+# out) on random tokens. This one has learned to be very sure about what
+# comes next in real text, and it applies that confidence everywhere.
+#
+# ## What we know so far
+#
+# * Pretraining builds skills in a fixed order: token frequencies → short
+#   phrases → copying from context → grammar → common facts → rarer facts.
+# * Most of the loss drop happens in the first 0.7% of training. Knowledge
+#   lives in the long, slow tail.
+# * Some abilities switch on suddenly (copying, between steps 512 and 1,000);
+#   others flicker, and some get worse.
+# * A 70M model never learns that Paris is the capital of France, even after
+#   300B tokens. Size limits what it can store.
+#
+# Every one of these measurements, and everything since lesson 03, used the
+# same number: the **loss**. What does 4.21 nats per token actually mean? Is
+# it good? Lesson 06 starts part 2: from here on we stop rewinding a finished
+# model and take the training step itself apart.
 
 # %%
 save_result("05_rewind_pretraining", {"model": PYTHIA, "tokens_per_step": TOKENS_PER_STEP, "vocab": len(tok),

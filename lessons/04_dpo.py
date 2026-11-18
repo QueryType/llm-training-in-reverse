@@ -13,8 +13,22 @@
 # own SFT model (lesson 03), call the longer one "chosen" and the shorter one
 # "rejected", and train. No human labels, no new data.
 #
+# Why "longer"? Not because it's a good preference (it isn't, and we'll see
+# why), but because it's one we can check with `len()`. A real preference,
+# like "more helpful" or "more honest", needs humans or a judge model to
+# measure. The training algorithm doesn't care what the preference *means*:
+# it only sees pairs labelled "this one over that one". So a preference we
+# can measure exactly is the best way to watch the algorithm itself.
+#
 # Questions: **does the model learn the preference without ever seeing a
 # "correct" answer? What does it cost? And what happens if we pull too hard?**
+#
+# The plan:
+# 1. make preference pairs by sampling from our SFT model;
+# 2. write the score DPO needs (log-probability of a whole answer);
+# 3. write the DPO loss (five lines);
+# 4. train twice, once on a short leash and once pulling hard, and measure
+#    what the model became, not only whether it won on the training pairs.
 
 # %%
 import os, sys, copy, random, statistics
@@ -43,6 +57,12 @@ print(f"device: {device}   prompts: {len(train_prompts)} train, {len(test_prompt
 # Sample two answers for each prompt (temperature 0.9), and keep the pairs
 # where the lengths differ clearly. Batched generation needs **left** padding,
 # so every prompt ends right where the answer starts.
+#
+# This is "self-play" preference data: the model is only ever asked to choose
+# between two things *it already says*. DPO can't teach it something
+# completely new; it shifts probability between answers the model can already
+# produce. (Production pipelines often do the same: sample from the current
+# model, then have humans or a reward model pick the winner.)
 
 # %%
 @torch.no_grad()
@@ -84,9 +104,20 @@ print(f"\n  prompt:   {ex['prompt']}\n  chosen:   {ex['chosen']!r}  ({ex['len_c'
 # %% [markdown]
 # ## Step 2: score an answer
 #
+# 499 of the 1,024 prompts gave a usable pair. The chosen answers average
+# 44 tokens, the rejected 28. Look at the example: the longer one isn't
+# better (the violin wasn't "known as the Lute of the 1600's", and both
+# answers are shaky). Our label only measures length, and the model will
+# learn exactly that and nothing more.
+#
 # DPO needs one number per answer: how likely is this whole answer under a
 # model? That's the **sum of the log-probabilities** of its tokens (the
 # prompt tokens don't count, same masking as lesson 03).
+#
+# A sum, not an average. A long answer has more tokens, each with a negative
+# log-probability, so its total is much lower than a short answer's. That's
+# fine because DPO never compares the two answers' raw scores; it compares
+# each answer to *itself* under the reference model (next step).
 
 # %%
 def batch_ids(rows, key):
@@ -116,6 +147,19 @@ def seq_logp(model, x, y, att):
 #
 # β is the leash. Small β: the loss stays high until the policy moves far from
 # the reference. Large β: small moves are enough. That's the whole algorithm.
+#
+# Where does it come from? RLHF maximises "reward minus a penalty for moving
+# away from the reference". The DPO paper showed that the best policy for that
+# objective has a closed form, and that you can turn it around: the reward is
+# then β · log(π/π_ref), up to a constant that cancels when you subtract two
+# answers to the same prompt. So instead of fitting a reward model and then
+# running RL against it, you fit the policy directly on the pairs. The
+# reference model *is* the penalty.
+#
+# `−log σ(x)` is the loss of a logistic regression: near 0 when the margin x
+# is large and positive, about 0.69 (= log 2) when x = 0, and growing linearly
+# when x is negative. At step 0 the policy equals the reference, both rewards
+# are 0, and the loss is exactly 0.693.
 
 # %%
 def dpo_loss(pc, pr, rc, rr, beta):
@@ -248,6 +292,20 @@ good, log_good, ev_good, ex_good = train_dpo(beta=0.1, lr=5e-6, epochs=EPOCHS, l
 #   *gap*, and the cheapest way to open a gap is often to make *both* answers
 #   less likely, the rejected one much more so.
 # * **length**: the behaviour we asked for, on prompts it never trained on.
+#
+# With β = 0.1, one epoch (62 steps of 8 pairs):
+# * accuracy on training pairs goes to ~92%, loss from 0.69 to ~0.38;
+# * greedy answers on held-out prompts grow from **33 to 59 tokens** (70 at
+#   step 40) and still stop by themselves;
+# * the SFT test loss rises from **1.18 to 1.29**. That's the cost: the model
+#   is now a little worse at the plain conversations it was trained on, because
+#   those answers are short.
+# * Δlogp: chosen −6.0, rejected −15.8 (averaged over the last 40 steps). Both
+#   went *down*. The model won the preference by making short answers much less
+#   likely, not by making long answers more likely.
+#
+# Now the same data, pulled hard: β ten times smaller (a ten times looser
+# leash), learning rate four times higher, two epochs.
 
 # %%
 loose, log_loose, ev_loose, ex_loose = train_dpo(beta=0.01, lr=2e-5, epochs=EPOCHS * 2, label="(pulled hard)")
@@ -293,6 +351,23 @@ axs[0].legend(); axs[1].legend(fontsize=7)
 show_fig(fig, "04_dpo")
 
 # %% [markdown]
+# What the numbers say for the pulled-hard run (β = 0.01, 124 steps):
+#
+# | | SFT start | β=0.1 | β=0.01, pulled hard |
+# |---|---|---|---|
+# | greedy length (tokens) | 33 | 59 | 53 |
+# | sampled length | 35 | 60 | 50 |
+# | stops by itself (greedy / sampled) | 100% / 100% | 100% / 99% | 100% / 100% |
+# | SFT test loss | 1.18 | 1.29 | **3.75** (4.04 at step 120) |
+# | Δlogp chosen / rejected | 0 / 0 | −6 / −16 | **−36 / −133** |
+#
+# Our first draft of this lesson predicted the pulled-hard model would
+# ramble, repeat itself, or never stop. It doesn't. Its answers are not much
+# longer than the sensible run's, they stop, and they read well: "For a dog
+# that gets anxious during grooming, it's generally recommended to try to
+# desensitize them...". Repeated 3-grams go from 0.4% to 1.3%: up, but you
+# wouldn't notice.
+#
 # **Aha:** the greedy answers of the loose-leash model look fine, even good.
 # The measurements say otherwise: its SFT test loss has tripled, and its
 # *chosen* answers, the ones it was told to prefer, are now far less likely
@@ -307,6 +382,28 @@ show_fig(fig, "04_dpo")
 # model that was already sensible. Real preference data has the same length
 # trap (raters tend to prefer longer answers), which is one reason chat
 # models are so wordy.
+#
+# A test loss of 3.75 means the model now finds ordinary assistant replies
+# from lesson 03 *far* less likely than the base model did before any SFT
+# (2.19). It still writes fluent text, but it has moved to a narrow corner of
+# its own: whatever it wrote during training, longer. The damage is in the
+# probabilities of everything it *doesn't* say, which is where you'd never
+# look by reading samples.
+#
+# ## What we know so far
+#
+# * Preference tuning learns from pairs, "this over that", with no correct
+#   answer anywhere. DPO does it with one loss and a frozen reference model.
+# * It learns exactly what the labels measure. We measured length, and got
+#   length (33 → 59 tokens), not quality.
+# * It has a cost on everything else (test loss 1.18 → 1.29 with a short leash).
+# * Pulled hard, it over-optimises: the training metric keeps improving, the
+#   samples look fine, and the held-out loss triples. **Always measure on
+#   held-out data, not only on what you trained.**
+#
+# That's the end of post-training. Everything the SFT and DPO steps worked
+# with, the facts, the grammar, the ability to write a sentence at all, came
+# from the base model. Lesson 05 rewinds into pretraining to watch that appear.
 
 # %%
 save_result("04_dpo", {
