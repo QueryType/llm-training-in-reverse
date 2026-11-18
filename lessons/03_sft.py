@@ -11,9 +11,19 @@
 # 1. the data is **conversations** in the chat template, and
 # 2. we only **grade the assistant's tokens** (loss masking).
 #
+# "Supervised" just means every example comes with the right answer: a
+# human (or a bigger model) wrote what the assistant should say, and we train
+# the model to say it. There's no reward, no judge, no comparison between
+# answers; that comes in lesson 04.
+#
 # Question: **how much data and time does it take to turn our base model into
 # an assistant?** We'll use 2,260 short conversations (`everyday-conversations`,
 # a dataset from the SmolLM2 team) and about 2 minutes of training.
+#
+# This is the first lesson that *trains* anything, so it's also our first
+# look at the training loop that every later lesson takes apart: forward pass,
+# loss, backward pass, optimizer step. Here we use it as a black box from
+# PyTorch. Lessons 06–09 open each piece.
 
 # %%
 import os, sys, random, inspect
@@ -32,6 +42,10 @@ print(f"device: {device}   train: {len(train_convs)} conversations   test: {len(
 
 # %% [markdown]
 # ## The data
+#
+# Each example is a list of messages, alternating user and assistant, about
+# 7.7 messages long on average. The topics are everyday small talk: greetings,
+# budgeting, cooking, travel. No code, no maths, no poems.
 
 # %%
 banner("One training conversation")
@@ -44,6 +58,16 @@ for m in train_convs[0][:4]:
 # We write the template ourselves: one line per message. Then we make a
 # second list, `labels`, with the same length. Wherever it says **-100**,
 # PyTorch's loss ignores that position. That's all "loss masking" is.
+#
+# Note what *is* graded: the assistant's words **and** the `<|im_end|>` after
+# them. That one token is how the model learns to stop (lesson 01). The
+# header `<|im_start|>assistant\n` is not graded: at inference time we write
+# it ourselves, so the model never needs to produce it.
+#
+# Also note that we don't use a system prompt. SmolLM2-Instruct's template
+# adds one by default; our models will be trained without it, so we prompt
+# them without it too (`our_chat_prompt`). A model only knows the format it
+# was trained on.
 
 # %%
 print(inspect.getsource(chat_ids))
@@ -66,10 +90,19 @@ n_learn = sum(sum(l != -100 for l in lab) for _, lab in all_data)
 print(f"\n  whole dataset: {n_tok:,} tokens, of which {n_learn:,} ({n_learn / n_tok:.0%}) are graded")
 
 # %% [markdown]
+# 57% of the tokens are graded: assistant replies are longer than user
+# messages in this dataset, so the masked part is less than half.
+#
 # ## The loss, written out
 #
 # The model sees tokens `0..n-1` and predicts tokens `1..n`. So the logits at
 # position *t* are compared with the token at position *t+1*: shift by one.
+#
+# For each graded position, the loss is **cross-entropy**: minus the log of
+# the probability the model gave to the real next token. Give it 100% and
+# the loss is 0; give it 1% and the loss is 4.6. The loss of a batch is the
+# average over all graded positions. (Lesson 06 is about what this number
+# means; for now, lower is better.)
 
 # %%
 def sft_loss(model, x, y, att):
@@ -89,8 +122,16 @@ print(f"  our loss {ours:.5f}   transformers' loss {lib:.5f}   (the library does
 #
 # The **test loss** on assistant tokens of 119 held-out conversations, and a
 # few answers. For comparison, we also score Hugging Face's own
-# SmolLM2-135M-Instruct (trained on about 1M conversations, including ones
-# like these).
+# SmolLM2-135M-Instruct (trained on hundreds of thousands of varied
+# conversations, including ones like these, then preference-tuned).
+#
+# The test conversations are never used for training. If the model only
+# memorised the training set, its train loss would fall and its test loss
+# wouldn't. Watching both is the simplest check that it's learning something
+# general.
+#
+# Half the prompts look like the training data; the other half (a fact, a
+# poem) don't. That tells us what SFT transfers and what it doesn't.
 
 # %%
 test_data = [chat_ids(tok, c) for c in test_convs]
@@ -134,11 +175,26 @@ print(f"  test loss: base {loss_before:.3f}   SmolLM2-Instruct {loss_inst:.3f}")
 answers_before = show_answers(model, "base model, before SFT")
 
 # %% [markdown]
+# Before training, the base model's test loss is 2.19 and its answers are
+# what lesson 01 showed: it writes the *user's* next message ("what is the
+# best way to get rid of a bad smell in my house"), or a quiz. Even inside
+# the template, it doesn't know which side of the conversation it's on.
+#
 # ## The training loop
 #
 # The full recipe in ~20 lines: shuffle, batch, forward, loss, backward, step.
 # The learning rate warms up for a few steps, then decays (lesson 09 explains
 # why). We look at the test loss every 50 steps.
+#
+# Three lines do all the work, and each gets its own lesson later:
+# * `loss = sft_loss(...)`: how wrong are we? (lesson 06)
+# * `loss.backward()`: for every weight, which direction lowers the loss? (lesson 07)
+# * `opt.step()`: move each weight a little in that direction. AdamW scales
+#   each step per weight (lesson 08), by a learning rate that changes over
+#   time (lesson 09).
+#
+# `clip_grad_norm_` caps the size of one step in case a batch gives a huge
+# gradient (also lesson 09).
 
 # %%
 STEPS = 2 * len(all_data) // 8 if FULL else 200      # FULL=1: two epochs (~6 min on an M4 Pro)
@@ -184,19 +240,35 @@ show_fig(fig, "03_sft_loss")
 answers_after = show_answers(model, f"after {STEPS} steps of SFT ({train_s:.0f}s)")
 
 # %% [markdown]
-# Two minutes, and the base model talks like an assistant: short, friendly
-# replies that **stop by themselves**. It gets France right (the fact was in
-# the base model all along). The haiku fails: there are no poems in 2k
-# everyday conversations, so it falls back to chit-chat and asks a question.
+# Two minutes (133 s on an M4 Pro), and the base model talks like an
+# assistant: short, friendly replies that **stop by themselves**. Go through
+# the four answers:
+#
+# * **Book**: "Hello! How can I help you today?" Polite, the right role, but
+#   no book. That is word for word the assistant's first reply in **2,248 of
+#   the 2,260** training conversations: they almost all start with a greeting
+#   and that exact reply. SFT copies the *habits* of its data, good and bad.
+# * **Dinner**: a pasta salad suggestion. On topic and in the right voice.
+# * **France**: "The capital city of France, Paris", with the Louvre and Notre
+#   Dame. None of the 2,260 conversations taught it that; the fact was in the
+#   base model all along, and SFT gave it a way to say it.
+# * **Haiku**: fails. There are no poems in 2k everyday conversations, so it
+#   falls back to chit-chat and asks *you* a question about the ocean.
+#
+# Note that 200 steps × 8 is 1,600 conversations: the model hasn't even
+# seen the whole training set once. And most of the drop happens in the first
+# 50 steps (test loss 2.19 → 1.26); the next 150 only take it to 1.18. Learning
+# a format is fast; it's the first thing a model picks up.
 #
 # Look at the loss plot, too: on *this* test set, our 2-minute model beats
-# SmolLM2-Instruct (≈1.18 vs ≈1.21). Theirs was trained on about a million much
-# more varied conversations; ours specialised. A low loss on your own test set
-# only tells you about data like your test set.
+# SmolLM2-Instruct (1.18 vs 1.20). Theirs was trained on far more varied
+# conversations; ours specialised. A low loss on your own test set only
+# tells you about data like your test set (the haiku is the proof).
 #
 # **Aha:** SFT doesn't add knowledge, it adds **format and role**. A couple of
 # thousand examples and two minutes are enough for that, because (lesson 02)
-# the knowledge was already there.
+# the knowledge was already there. What it does add, it copies from the
+# data: the style, the openers, and the gaps.
 #
 # ## What did masking do?
 #
@@ -215,11 +287,28 @@ print(f"  assistant tokens: before {loss_before:.3f}   after {a_after:.3f}")
 del fresh
 
 # %% [markdown]
-# The assistant loss halved. The user loss **didn't move**. Every bit of the
-# training signal went into the assistant's side of the conversation: the
-# model learned to *answer* users, not to *imitate* them. That's what masking
-# buys you. Without it (try below), part of every step is spent learning to
-# write questions that the model will never need to write.
+# The assistant loss nearly halved (2.19 → 1.18). The user loss **didn't
+# move** (2.357 → 2.346). Every bit of the training signal went into the
+# assistant's side of the conversation: the model learned to *answer* users,
+# not to *imitate* them. That's what masking buys you. Without it (try below),
+# part of every step is spent learning to write questions that the model will
+# never need to write.
+#
+# It's also a nice sanity check that masking works. If a bug let user tokens
+# into the loss, the user loss would have dropped too.
+#
+# ## What we know so far
+#
+# * SFT = next-token training on conversations, grading only the assistant's
+#   tokens (labels = -100 elsewhere), including the `<|im_end|>` that ends a turn.
+# * 200 steps on 2k conversations turns a base model into a passable
+#   assistant. The format is learned in the first few dozen steps.
+# * It copies its data: it answers what the data covers and stumbles on what it
+#   doesn't.
+#
+# SFT can only teach "say *this*". It can't say "this answer is *better* than
+# that one". We'll save the model; lesson 04 starts from it and teaches
+# preferences.
 
 # %%
 CKPT.mkdir(parents=True, exist_ok=True)

@@ -10,8 +10,34 @@
 # architecture, same size, same tokenizer. The only difference is a few more
 # rounds of training (lessons 02–04).
 #
-# Question: **what does that extra training actually change?** Let's look from
-# the outside first.
+# ### The map, read backwards
+#
+# A modern chat model is made in roughly this order:
+#
+#     random weights ──pretraining──▶ base model ──SFT──▶ ──preference tuning──▶ chat model
+#                     lessons 05–13               lesson 03     lesson 04 (DPO)      lessons 01–02
+#
+# **Pretraining** is by far the biggest stage: the model reads a huge pile of
+# text (SmolLM2-135M saw about 2 trillion tokens) and learns one thing,
+# *predict the next token*. Everything it knows comes from here.
+# **Post-training** (SFT, then preference tuning) is tiny by comparison and
+# turns that text-predictor into something that answers you.
+#
+# Courses usually go left to right, so you spend ten lessons on gradients
+# before you see anything that talks. We go right to left. Each lesson asks
+# "where did *this* come from?" and the answer is the next lesson. By lesson
+# 07 we're inside a single gradient step; from lesson 10 on we build the whole
+# pipeline ourselves, ending with a chat model we trained from random numbers
+# (lesson 14).
+#
+# ### Today
+#
+# Question: **what does that extra training actually change?** We won't look
+# inside yet. We treat both models as black boxes and only compare what goes
+# in and what comes out. Three things to watch for:
+# 1. Are the two models built the same way?
+# 2. Do they react differently to the same text?
+# 3. What exactly is the "chat format" each of them expects?
 
 # %%
 import os, sys
@@ -28,6 +54,10 @@ R = {"answers": {}}          # what we save for the interactive page
 
 # %% [markdown]
 # ## Are they really the same shape?
+#
+# If post-training added layers or changed the architecture, the difference
+# would be easy to explain. Let's check: count parameters, compare every
+# tensor's shape and diff the two config files.
 
 # %%
 banner("Same body?")
@@ -42,9 +72,17 @@ print(f"  config differences: {diff}")
 print("  -> only the special-token ids differ. Everything else is the numbers inside the weights.")
 
 # %% [markdown]
+# Same 134,515,008 numbers arranged the same way; the configs differ only in
+# which token ids count as "beginning" and "end". So whatever post-training
+# did, it did by **changing the values** of existing weights. Keep that in
+# mind: it means we can compare the two models number by number (lesson 02).
+#
 # ## Same question, plain text
 #
-# Ask both models a question as plain text, the way you'd type it into a search box.
+# Ask both models a question as plain text, the way you'd type it into a
+# search box. We use **greedy decoding** (always take the most likely next
+# token) so that every run gives the same output and differences come from
+# the models, not from the dice.
 
 # %%
 QUESTIONS = ["What is the capital of France?",
@@ -60,11 +98,20 @@ for q in QUESTIONS:
     print(f"  instruct -> {a['inst_plain']!r}")
 
 # %% [markdown]
-# The base model treats the question as the start of a document. Sometimes it
-# answers, sometimes it writes the *next question* on the worksheet (look at
-# the haiku one: it starts listing more homework).
+# The base model treats the question as the start of a document and keeps
+# writing that document. For France it happens to continue with an answer
+# (plus a made-up population and a Seine "near the border with Belgium").
+# For sleep tips it writes a numbered list, because lists often follow such a
+# line on the web. For the haiku it writes `10) Write an essay on...`: to a
+# base model, "Write a haiku about the sea." looks like item 9 on a homework
+# sheet, so the most likely next text is item 10.
 #
-# The instruct model returns **nothing**. Why? Look at what it predicts first:
+# None of this is a bug. A base model was trained to answer one question,
+# *"what text comes next on a typical web page?"*, and it answers it well.
+# Being helpful was never part of the job.
+#
+# The instruct model returns **nothing** at all: an empty string. Why? Look
+# at what it predicts as the very first token:
 
 # %%
 banner("Instruct model: next token after a plain question")
@@ -76,10 +123,18 @@ print("  -> it predicts '<|im_end|>' (end of turn). It has only ever seen questi
 print("     inside a chat template, so to it, a bare question is a finished message.")
 
 # %% [markdown]
+# 73% of its probability goes to `<|im_end|>`, the token that closes a turn.
+# Post-training showed it thousands of conversations, and in every one a
+# user's message was followed by `<|im_end|>`. A question with nothing
+# around it looks like a user message that just ended, so it closes it.
+# The model isn't refusing; it's waiting for the template.
+#
 # ## The chat template is just text
 #
 # A "chat" is a single string with special tokens marking who is speaking.
-# The model never sees JSON or roles, only this:
+# The API's list of `{"role": ..., "content": ...}` messages is turned into
+# this string before the model sees anything. The model never sees JSON or
+# roles, only this:
 
 # %%
 banner("What the model actually reads")
@@ -92,6 +147,16 @@ print(f"\n  <|im_start|> = token {tok.convert_tokens_to_ids('<|im_start|>')},"
       f"  <|im_end|> = token {tok.convert_tokens_to_ids('<|im_end|>')}"
       "  (both already exist in the BASE vocabulary)")
 
+# %% [markdown]
+# Notice the system prompt: "You are a helpful AI assistant named SmolLM,
+# trained by Hugging Face" is 16 tokens of ordinary text that the template
+# adds unless you supply your own. "Who am I" is part of the prompt, not
+# something stored in a special place.
+#
+# The two special tokens already exist in the base model's vocabulary; the
+# base model just never learned what they mean. Changing what a model does
+# doesn't require new tokens, only new *habits* around existing ones.
+
 # %%
 banner("Same question, inside the chat template")
 for q in QUESTIONS:
@@ -103,20 +168,34 @@ for q in QUESTIONS:
     print(f"  instruct -> {a['inst_chat']!r}")
 
 # %% [markdown]
-# Now the instruct model answers properly, and the base model falls apart.
-# It has rarely seen `<|im_start|>assistant` in its training data, so it has
-# no idea what comes next.
+# Now the instruct model answers properly, and the base model falls apart:
+# a cave animal with no legs for "capital of France", run-together words for
+# the sleep question. It has rarely seen `<|im_start|>assistant` in its
+# training data, so after it the base model has no idea what text is likely.
+# Unusual input leads to unusual output.
+#
+# Put the two experiments side by side:
+#
+# | | plain question | chat template |
+# |---|---|---|
+# | **base** | continues the document (sometimes answers) | lost |
+# | **instruct** | ends the turn, says nothing | answers |
+#
+# Each model works only in the format it was trained on.
 #
 # **Aha:** the two models have the same architecture and the same size. The
 # instruct model learned a *format* (the template) and a *role* (answer the
-# question, then stop). Did it also learn new facts? Did it lose any? Lesson 02
-# opens up the weights to find out.
+# question, then stop). It didn't need a bigger brain to do that. Did it also
+# learn new facts? Did it lose any? Lesson 02 opens up the weights to find out.
 
 # %% [markdown]
 # ## Where does it stop?
 #
-# A chat model has to know when its turn is over. Let's count how many
-# tokens each model writes before it emits `<|im_end|>` by itself.
+# A chat model has to know when its turn is over. Without that, every answer
+# would run on until the length limit, and the app would have to guess where
+# to cut. Let's count how many tokens each model writes before it emits
+# `<|im_end|>` by itself. (We add a mild `repetition_penalty` so that greedy
+# decoding doesn't get stuck in a loop and hide the result.)
 
 # %%
 banner("Who knows when to stop? (up to 120 new tokens)")
@@ -134,6 +213,24 @@ for name, m in (("base", base), ("instruct", inst)):
 save_result("01_two_models", R)
 
 # %% [markdown]
+# The base model never stops: it fills all 120 tokens every time, because in
+# its training data `<|im_end|>` almost never appears. The instruct model
+# stops after 94 and 78 tokens on two of the three questions and runs out of
+# room on the sleep tips (a long list). Stopping is a *learned* behaviour, and
+# a fragile one in a model this small; lesson 03 shows how little training it
+# takes to learn it, and lesson 14 measures it on our own model.
+#
+# ## What we know so far
+#
+# * Same architecture, same 134.5M weights, same tokenizer. Only the values differ.
+# * The base model continues documents. The instruct model answers turns.
+# * A "chat" is a plain string with `<|im_start|>` / `<|im_end|>` markers,
+#   and each model only behaves well in its own format.
+# * Knowing when to stop is part of what post-training teaches.
+#
+# Next question: since only the values of the weights differ, **how much did
+# they change, and where?**
+#
 # ## Try:
 # * Put the plain question in a *document-like* frame for the base model:
 #   `"Q: What is the capital of France?\nA:"`. A base model can be prompted into

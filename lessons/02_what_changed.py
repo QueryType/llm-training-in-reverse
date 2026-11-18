@@ -7,8 +7,18 @@
 #
 #     Δ = W_instruct − W_base
 #
+# This is a luxury. Normally you only get the finished chat model. SmolLM2
+# publishes both ends of post-training, so Δ is *exactly* what SFT and
+# preference tuning did, summed up into one set of numbers per weight.
+#
 # Questions: **How big is Δ? Where is it? Is it a big rewrite or a small,
 # precise edit? And did the model forget anything?**
+#
+# We'll answer them with four experiments, all without any training:
+# 1. measure Δ: total size, and size per matrix and layer;
+# 2. replace Δ with **random** noise of the same size, to see if size alone matters;
+# 3. add only a **fraction** α of Δ, to see how much of it you need;
+# 4. ask the base model to **rate the instruct model's words**, token by token.
 
 # %%
 import os, sys, copy
@@ -32,6 +42,12 @@ results = {}
 # For each weight matrix, compare the size of the change with the size of the
 # matrix: `‖Δ‖ / ‖W_base‖`. (‖·‖ is the square root of the sum of squares:
 # the "length" of all the numbers.)
+#
+# Why relative? A raw difference of 0.01 means little on its own: it's huge
+# for a weight that is 0.001 and noise for one that is 10. Dividing by ‖W‖
+# says "how far did this matrix move, as a fraction of its own size?". We
+# also look at the *typical* single weight and the typical single change
+# (medians, so a few outliers don't dominate).
 
 # %%
 banner("Relative change, whole model")
@@ -42,6 +58,17 @@ print(f"  ‖Δ‖ / ‖W_base‖ = {rel_global:.1%}")
 print(f"  share of weights that moved by less than 0.001: {(flat_d.abs() < 1e-3).float().mean():.1%}")
 print(f"  typical |weight| {flat_b.abs().median():.4f}   typical |change| {flat_d.abs().median():.4f}")
 results["rel_global"] = rel_global
+
+# %% [markdown]
+# 8.6%. And it's **dense**: only 7.3% of the weights moved by less than 0.001.
+# A typical weight is about 0.107 and a typical change about 0.010, so almost
+# every one of the 134.5M numbers was nudged by roughly a tenth of its size.
+# Post-training didn't find "the chat neurons" and rewrite them; it moved
+# everything a little.
+#
+# Now break it down by matrix and layer. (`q/k/v/o_proj` are the attention
+# projections, `gate/up/down_proj` the MLP, and the two layernorms are the
+# per-channel scales applied before each of them.)
 
 # %%
 banner("Where did it change? (relative change per matrix, by layer)")
@@ -71,10 +98,28 @@ show_fig(fig, "02_delta_map")
 results["delta_grid"] = {"kinds": KINDS, "grid": [[round(v, 4) for v in r] for r in grid.tolist()]}
 
 # %% [markdown]
-# Around 9% overall. The change is spread across every layer, strongest at
-# the very start (layer 0) where tokens first get read. Is 9% a lot? It
-# depends on the **direction** of the change, not only its size. Test: make a
-# *random* change of exactly the same size in each matrix and compare.
+# Two patterns stand out in the map:
+#
+# * **Layer 0 moved most**: its `v_proj` changed by 33%, its input layernorm
+#   by 32%, its `o_proj` by 23%. This is where the model first reads the
+#   tokens. The chat template is full of tokens the base model barely used
+#   (`<|im_start|>`, `<|im_end|>`, the word `assistant` right after them), and
+#   the first layer is where their meaning gets set up. The token embeddings
+#   moved by 11.7%, more than the average matrix, for the same reason.
+# * **Queries and keys grow with depth**: `q_proj` and `k_proj` move ~4–7% in
+#   the first layers and ~11–12% in the last ones. Attention in the late
+#   layers decides *which earlier tokens to use* for the next word; a new role
+#   ("answer the user") plausibly needs new choices there. (Plausibly: this
+#   map shows *where* things changed, not *why*.)
+#
+# The final norm barely moved (0.7%).
+#
+# Is 8.6% a lot? It depends on the **direction** of the change, not only its
+# size. Test: make a *random* change of exactly the same size in each matrix
+# and compare. We measure two things for each model: **perplexity** on a short
+# encyclopedia paragraph (lower = the text looks more familiar; perplexity is
+# exp of the average loss, and lesson 06 explains it properly) and its answer
+# to the France question inside the chat template.
 
 # %%
 TEXT = ("The Eiffel Tower is a wrought-iron lattice tower on the Champ de Mars in Paris, France. "
@@ -122,9 +167,15 @@ results["random"] = rand_rows
 results["ppl_base"], results["ppl_inst"] = perplexity(base), perplexity(inst)
 
 # %% [markdown]
-# A random change of the same size **nearly doubles the perplexity** and still
-# doesn't chat. The trained change hardly moves the perplexity on
-# encyclopedia text (the facts survived) *and* it adds a whole new behaviour.
+# A random change of the same size **nearly doubles the perplexity**
+# (5.87 → 10.74) and still doesn't chat; it starts writing quiz questions.
+# Even a quarter of that random change costs as much perplexity as the whole
+# trained one. The trained change barely moves the perplexity on encyclopedia
+# text (5.87 → 6.01: the knowledge survived) *and* it adds a whole new
+# behaviour.
+#
+# In a space of 134.5 million dimensions, almost every direction is useless
+# or harmful. Training found one of the very few that help.
 #
 # **Aha:** post-training is a small, very precisely aimed edit. Nearly all the
 # knowledge was already in the base model.
@@ -132,6 +183,10 @@ results["ppl_base"], results["ppl_inst"] = perplexity(base), perplexity(inst)
 # ## Dial it in: how much of Δ do we need?
 #
 #     W(α) = W_base + α · Δ          α = 0 → base,  α = 1 → instruct
+#
+# If chatting needed the full edit, the answers should stay broken until α is
+# close to 1. If it's one main direction plus fine-tuning on top, they
+# should switch early.
 
 # %%
 banner("Walking from base (α=0) to instruct (α=1)")
@@ -147,16 +202,33 @@ for a in (0.0, 0.1, 0.2, 0.3, 0.5, 0.75, 1.0, 1.25):
 results["alpha"] = alpha_rows
 
 # %% [markdown]
-# Somewhere between 10% and 30% of the way, it switches from "lost" to
-# "assistant". The rest of the way mostly polishes the style. You can even
-# go *past* 1.0 (extrapolate), which is a real trick ("model arithmetic");
-# check whether it helps or hurts here.
+# At α=0.1 the model is half-way: it mentions France and Paris but rambles
+# ("It's now calledParis"). At **α=0.2 it already answers**: "The capital
+# city of France is Paris." A fifth of the edit is enough to switch from
+# "lost" to "assistant". The rest of the way changes the style (its facts
+# get worse at 0.2: Paris "in the south-east corner of Europe") and the
+# phrasing slowly becomes the instruct model's.
+#
+# Look at the perplexity column too. It **drops** below the base model's
+# between α=0.1 and 0.75 (best 5.61 vs 5.87), then rises to 6.01 at α=1.
+# Part of Δ makes the model better at ordinary text, and the last stretch
+# trades a little of that for chat style. Some forgetting does happen; it's
+# just small. (Remember this when lesson 04 pulls harder.)
+#
+# Going *past* 1.0 (extrapolation, a real trick sometimes called "model
+# arithmetic") doesn't help here: at α=1.25 perplexity climbs to 6.69 and the
+# answer becomes "The capital of France. It's not an easy task to find".
 #
 # ## Which tokens changed?
 #
 # Let the instruct model write answers. Then, at every position, ask the
 # **base** model: what rank would you have given that same token?
 # Rank 0 means "the base model would have picked it too".
+#
+# This turns "what changed?" into a question about words, not weights. If
+# post-training rewrote the model's knowledge, the base model would rank the
+# instruct model's tokens badly everywhere. If it mostly changed the style,
+# the bad ranks should cluster on a few kinds of tokens.
 
 # %%
 banner("Instruct's tokens, ranked by the base model")
@@ -192,17 +264,34 @@ ax.set_title("How the BASE model ranks the INSTRUCT model's choices")
 show_fig(fig, "02_token_ranks")
 
 # %% [markdown]
-# About half of the instruct model's tokens are the base model's top choice
-# too, and most of the rest are in its top three. The tokens that changed
-# rank are mostly **style and format**: the first word of the answer
-# ("Here", "Absolutely"), markdown ("**", "1"), and words that set the tone.
-# Some content words move too (" Paris" is only rank 22 for the base model,
-# because the chat template confuses it so much).
+# 52.5% of the instruct model's tokens are the base model's top choice too,
+# and 74.5% are in its top three. Only 10.9% are ranked 10th or worse. And the
+# tokens that changed rank most are mostly **style and format**:
+#
+# * the first word of the answer: "Absol(utely)" is rank 1,189 for the base
+#   model, "Bo(iling)" 247, "Here" 28;
+# * markdown: the "1" that starts a numbered list (ranks 140–2,749) and "**"
+#   for bold (up to 295);
+# * words that set a tone: "angry beast", "whisper secrets" in the haiku.
+#
+# Once the instruct model has written "Here's my advice...\n\n1. **", the
+# base model happily predicts the rest itself. The big re-rankings happen at
+# the *start* of an answer and at *formatting* points; in between, the base
+# model mostly agrees.
+#
+# Some content words move too (" Paris" is only rank 22 for the base model).
+# That isn't missing knowledge: the base model answered Paris to the plain
+# question in lesson 01. It's the chat template confusing it so much that it
+# has no idea a capital is being asked for.
 #
 # **Aha:** this is the *superficial alignment hypothesis* (LIMA, 2023; URIAL,
-# 2023). Post-training mostly teaches *how* to talk, while *what* the model knows
-# comes from pretraining. So how do you teach that "how"? Lesson 03: write the
-# training loop that does it.
+# 2023). Post-training mostly teaches *how* to talk, while *what* the model
+# knows comes from pretraining. Three measurements agree: the edit is small and
+# aimed (random noise of the same size breaks things), a fifth of it is enough
+# to switch roles, and most of the new tokens are ones the base model would
+# have chosen anyway.
+#
+# So how do you teach that "how"? Lesson 03: write the training loop that does it.
 
 # %%
 save_result("02_what_changed", results)

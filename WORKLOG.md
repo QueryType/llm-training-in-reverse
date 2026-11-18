@@ -35,7 +35,7 @@ Handoff notes between working sessions. Not part of the course itself; delete be
 - [x] `site/build_data.py` (keys "01".."14", "mlx")
 
 ## To do (writing pass)
-- [ ] **Lessons 01–03 `.py`**: expand the markdown cells (more explanation, intuition, links between lessons)
+- [x] **Lessons 01–03 `.py`**: expand the markdown cells (more explanation, intuition, links between lessons)
 - [ ] **Lessons 04–14 + addendum `.py`**: review/expand markdown; make sure every stated number
       matches the latest results JSON (see "Key results" below; re-check them)
 - [ ] **Site Part 1**: expand 01–03 sections; write 04 (DPO) and 05 (Pythia) sections + widgets → show user
