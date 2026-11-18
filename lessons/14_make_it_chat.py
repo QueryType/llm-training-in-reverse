@@ -128,7 +128,7 @@ def grade(m, items, n=120, max_new=220):
     m.train()
     avg = lambda v: sum(v) / max(len(v), 1)
     return {"words": avg(scores["words"]), "dialogue": avg(scores["dialogue"]), "stops": avg(scores["stops"]),
-            "examples": scores["examples"]}
+            "n": len(scores["words"]), "n_dialogue": len(scores["dialogue"]), "examples": scores["examples"]}
 
 
 # A base rate: how often do the requested words appear in a *random* story from the data?
@@ -195,6 +195,7 @@ after = grade(model, test)
 banner("After SFT")
 for k, label in (("words", "requested words used"), ("dialogue", "dialogue when asked"), ("stops", "stops by itself")):
     print(f"  {label:22} {before[k]:5.0%} → {after[k]:5.0%}")
+print(f"  (words and stops: {after['n']} requests; dialogue: only the {after['n_dialogue']} that asked for it)")
 R["after"] = after
 
 # %%
@@ -236,10 +237,11 @@ show_fig(fig, "14_chat")
 #   than chance, though far from always: a 12M model with 10 minutes of
 #   pretraining and 80 seconds of SFT follows instructions *partly*. Like
 #   lesson 03, SFT taught **format and role**; the story-writing came from pretraining.
-# * Not every number improved. Dialogue-when-asked went *down*: the SFT stories
-#   are shorter and plainer than what the pretrained model rambled into, and
-#   "Include dialogue." is a rare, weakly-taught instruction after 600 steps.
-#   Measuring several things at once is how you catch a fix that breaks something else.
+# * The dialogue number is the shakiest one. It's measured on only the few
+#   dozen requests that asked for dialogue, most stories contain dialogue
+#   anyway, and in our runs it moved by up to ±15 points from one run to the
+#   next (once up, once down). With that few samples, a change that size is
+#   noise. Before you believe a metric moved, check how many samples it rests on.
 # * Having a checkable instruction (words, dialogue) turns "seems better" into
 #   a number. That's the core of every instruction-following benchmark, and
 #   it's what you'd need to try lesson 04's DPO here too.

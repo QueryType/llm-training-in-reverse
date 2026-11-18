@@ -17,7 +17,8 @@ OUT.mkdir(exist_ok=True)
 
 data = {}
 for f in sorted(RES.glob("*.json")):
-    data[f.stem[:2]] = json.loads(f.read_text())
+    key = f.stem[:2] if f.stem[:2].isdigit() else f.stem.split("_")[0]     # "03_sft" -> "03", "mlx_addendum" -> "mlx"
+    data[key] = json.loads(f.read_text())
     print(f"  {f.name:32} {f.stat().st_size / 1024:7.1f} KB")
 
 js = "window.RESULTS = " + json.dumps(data, separators=(",", ":")) + ";\n"
