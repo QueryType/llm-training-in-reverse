@@ -226,9 +226,12 @@ def char_data(n_train=60_000, n_val=2_000):
 
 
 def get_batch(data, batch, ctx, gen=None, device="cpu"):
-    """Random windows of ctx+1 tokens: x = first ctx, y = the same shifted by one."""
+    """Random windows of ctx+1 tokens: x = first ctx, y = the same shifted by one.
+    `data` is a 1-D tensor or numpy array (e.g. a memory-mapped token file)."""
     ix = torch.randint(len(data) - ctx - 1, (batch,), generator=gen)
-    w = torch.stack([data[i:i + ctx + 1] for i in ix.tolist()]).long()
+    rows = [torch.as_tensor(data[i:i + ctx + 1].astype("int64")) if not torch.is_tensor(data)
+            else data[i:i + ctx + 1] for i in ix.tolist()]
+    w = torch.stack(rows).long()
     return w[:, :-1].to(device), w[:, 1:].to(device)
 
 
@@ -285,3 +288,26 @@ def sample_text(model, prompt_ids, n=200, temperature=0.8, top_k=None, device="c
             break
     model.train()
     return ids[0, len(prompt_ids):].tolist()
+
+
+def bpe_tokenizer():
+    """Lesson 10's 4,096-token BPE as a regular transformers tokenizer."""
+    from transformers import PreTrainedTokenizerFast
+    path = OUT / "tokenizer" / "tokenizer.json"
+    if not path.exists():
+        sys.exit("Run lessons/10_tokenizer_and_data.py first: it trains the tokenizer.")
+    return PreTrainedTokenizerFast(tokenizer_file=str(path), eos_token="<|endoftext|>", pad_token="<|endoftext|>",
+                                   additional_special_tokens=["<|im_start|>", "<|im_end|>"])
+
+
+def bpe_data():
+    """(train, val) token streams from lesson 10, memory-mapped (they never fully load into RAM)."""
+    import numpy as np
+    tr, va = DATA / "ts4096_train.bin", DATA / "ts4096_val.bin"
+    if not tr.exists():
+        sys.exit("Run lessons/10_tokenizer_and_data.py first: it builds the token streams.")
+    return np.memmap(tr, dtype=np.uint16, mode="r"), np.memmap(va, dtype=np.uint16, mode="r")
+
+
+def bits_per_char(nats_per_token, chars_per_token):
+    return nats_per_token / math.log(2) / chars_per_token

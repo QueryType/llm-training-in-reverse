@@ -1,6 +1,8 @@
 torch>=2.15
 transformers>=5.0
 datasets
+tokenizers
 accelerate
 matplotlib
 ipykernel        # optional: run lessons cell-by-cell as notebooks
+# mlx            # optional, Apple Silicon only: lessons/mlx_addendum.py
