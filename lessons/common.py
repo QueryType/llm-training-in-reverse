@@ -169,3 +169,119 @@ class Timer:
 
     def __exit__(self, *a):
         self.s = time.perf_counter() - self.t0
+
+
+# ---------------------------------------------------------------------------
+# Part 2 and 3: tiny models trained from scratch on TinyStories
+# ---------------------------------------------------------------------------
+DATA = OUT / "data"                  # tokenized datasets we build (cached between lessons)
+EOS_CHAR = "\x03"                    # end-of-story marker for the character tokenizer
+
+
+def clean_story(text):
+    """TinyStories is almost pure ASCII. Straighten curly quotes, drop the rare junk characters."""
+    text = text.replace("“", '"').replace("”", '"').replace("’", "'").replace("‘", "'")
+    return text.encode("ascii", "ignore").decode().strip()
+
+
+def tinystories(split="train", n=None):
+    """List of cleaned stories. The dataset (~1.8 GB) downloads on first use."""
+    from datasets import load_dataset
+    ds = load_dataset("roneneldan/TinyStories", split=split)
+    texts = ds["text"] if n is None else ds.select(range(min(n, len(ds))))["text"]
+    return [t for t in (clean_story(x) for x in texts) if t]
+
+
+class CharTokenizer:
+    """The simplest tokenizer there is: one token per character (lessons 06-09)."""
+    def __init__(self):
+        self.chars = [EOS_CHAR, "\n"] + [chr(c) for c in range(32, 127)]
+        self.stoi = {c: i for i, c in enumerate(self.chars)}
+        self.eos_id = 0
+
+    def __len__(self):
+        return len(self.chars)
+
+    def encode(self, text):
+        return [self.stoi[c] for c in text if c in self.stoi]
+
+    def decode(self, ids):
+        return "".join(self.chars[i] for i in ids).replace(EOS_CHAR, "\n<end>\n")
+
+
+def char_data(n_train=60_000, n_val=2_000):
+    """(tokenizer, train_ids, val_ids) as uint8 tensors: stories joined with an end-of-story char.
+    Cached in outputs/data/ after the first call. 60k stories ≈ 50M characters."""
+    tokz = CharTokenizer()
+    path = DATA / f"chars_{n_train}_{n_val}.pt"
+    if path.exists():
+        d = torch.load(path)
+        return tokz, d["train"], d["val"]
+    DATA.mkdir(parents=True, exist_ok=True)
+    def build(texts):
+        return torch.tensor(tokz.encode(EOS_CHAR.join(texts) + EOS_CHAR), dtype=torch.uint8)
+    train, val = build(tinystories("train", n_train)), build(tinystories("validation", n_val))
+    torch.save({"train": train, "val": val}, path)
+    return tokz, train, val
+
+
+def get_batch(data, batch, ctx, gen=None, device="cpu"):
+    """Random windows of ctx+1 tokens: x = first ctx, y = the same shifted by one."""
+    ix = torch.randint(len(data) - ctx - 1, (batch,), generator=gen)
+    w = torch.stack([data[i:i + ctx + 1] for i in ix.tolist()]).long()
+    return w[:, :-1].to(device), w[:, 1:].to(device)
+
+
+def tiny_llama(vocab, d=128, layers=4, heads=4, ctx=256, ffn=None, seed=0):
+    """A Llama-style model (same design as SmolLM2), just small. Built with transformers'
+    own LlamaForCausalLM, so everything from 'Transformers, Inside Out' works on it."""
+    from transformers import LlamaConfig, LlamaForCausalLM
+    ffn = ffn or 32 * round(8 / 3 * d / 32)          # SwiGLU's usual 8/3 ratio, rounded
+    cfg = LlamaConfig(vocab_size=vocab, hidden_size=d, intermediate_size=ffn, num_hidden_layers=layers,
+                      num_attention_heads=heads, num_key_value_heads=heads, max_position_embeddings=ctx,
+                      tie_word_embeddings=True, rms_norm_eps=1e-5, rope_theta=10000.0,
+                      bos_token_id=None, eos_token_id=None, pad_token_id=None)
+    torch.manual_seed(seed)
+    return LlamaForCausalLM(cfg)
+
+
+def n_params(model, embeddings=True):
+    n = sum(p.numel() for p in model.parameters())
+    if not embeddings:
+        n -= model.get_input_embeddings().weight.numel()
+    return n
+
+
+@torch.no_grad()
+def eval_loss(model, data, ctx, batch=32, n_batches=20, device="cpu", seed=1234):
+    """Average next-token loss (nats) on fixed random windows of `data`."""
+    was = model.training
+    model.eval()
+    g = torch.Generator().manual_seed(seed)
+    tot = 0.0
+    for _ in range(n_batches):
+        x, y = get_batch(data, batch, ctx, g, device)
+        logits = model(input_ids=x).logits
+        tot += torch.nn.functional.cross_entropy(logits.flatten(0, 1), y.flatten()).item()
+    model.train(was)
+    return tot / n_batches
+
+
+@torch.no_grad()
+def sample_text(model, prompt_ids, n=200, temperature=0.8, top_k=None, device="cpu", seed=0, stop_id=None):
+    """Plain sampling loop for our own models (no KV cache: they're tiny)."""
+    model.eval()
+    g = torch.Generator(device="cpu").manual_seed(seed)
+    ids = torch.tensor([prompt_ids], device=device)
+    ctx = model.config.max_position_embeddings
+    for _ in range(n):
+        logits = model(input_ids=ids[:, -ctx:]).logits[0, -1].float().cpu() / max(temperature, 1e-5)
+        if top_k:
+            v, _ = torch.topk(logits, top_k)
+            logits[logits < v[-1]] = -float("inf")
+        nxt = torch.multinomial(logits.softmax(-1), 1, generator=g).item()
+        ids = torch.cat([ids, torch.tensor([[nxt]], device=device)], 1)
+        if stop_id is not None and nxt == stop_id:
+            break
+    model.train()
+    return ids[0, len(prompt_ids):].tolist()
