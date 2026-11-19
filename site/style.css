@@ -280,3 +280,4 @@ footer { padding-block: 4rem 2rem; border-top: 1px solid var(--line); margin-top
 .lesson > .bench { width: 100%; }
 .panel > *, .panel .grid2 > * { min-width: 0; }
 .out-box { overflow-wrap: anywhere; }
+mark.hitword { background: var(--hot-soft); color: var(--hot); font-weight: 600; border-radius: 3px; padding: 0 0.15rem; }

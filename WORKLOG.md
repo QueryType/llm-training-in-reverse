@@ -36,14 +36,14 @@ Handoff notes between working sessions. Not part of the course itself; delete be
 
 ## To do (writing pass)
 - [x] **Lessons 01–03 `.py`**: expand the markdown cells (more explanation, intuition, links between lessons)
-- [ ] **Lessons 04–14 + addendum `.py`**: review/expand markdown; make sure every stated number
+- [x] **Lessons 04–14 + addendum `.py`**: review/expand markdown; make sure every stated number
       matches the latest results JSON (see "Key results" below; re-check them)
-      - [x] 04, 05 done (2026-11-18)   - [x] 06–09 done (2026-11-19)   - [ ] 10–14, addendum
+      - [x] 04, 05 done (2026-11-18)   - [x] 06–09 done (2026-11-19)   - [x] 10–14, addendum (2026-11-19)
 - [x] **Site Part 1**: expand 01–03 sections; write 04 (DPO) and 05 (Pythia) sections + widgets
       (checked desktop + 390px); user approved (2026-11-19)
 - [x] **Site Part 2**: 06–09 sections + widgets in `site/js/part2.js` (checked desktop + 390px)
-- [ ] **Site Part 3**: 10–14 sections + widgets; MLX addendum section
-- [ ] Update hero journey one-liners with measured facts; remove "soon" classes in the TOC
+- [x] **Site Part 3**: 10–14 sections + MLX section in `site/js/part3.js` (checked desktop + 390px)
+- [x] Update hero journey one-liners with measured facts; remove "soon" classes in the TOC (MLX added to TOC)
 - [ ] **README**: fill the lesson table (questions, what you do, aha with numbers), hardware timings, layout
 - [ ] Final: rebuild site data, screenshot check (desktop + 390px), commit
 

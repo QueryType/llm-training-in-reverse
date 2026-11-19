@@ -254,7 +254,8 @@ show_fig(fig, "14_chat")
 # ends cleanly and is about *one* of the things asked for.
 #
 # One pattern worth checking: in all five saved test examples, the *first*
-# requested word is the one that's missing (act, stir, regret, guess, get).
+# requested word is missing (act, stir, regret, guess, get; in the last one
+# "orange" is missing too), while the others mostly appear.
 # Five examples prove nothing, but it's the kind of thing a real evaluation
 # would break down (see **Try**).
 #
