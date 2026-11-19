@@ -57,6 +57,8 @@ Each lesson is a plain `.py` file split into `# %%` cells. It runs as a script
 
 ## The interactive explainer (`site/`)
 
+**Read it online: https://querytype.github.io/llm-training-in-reverse/** (no setup).
+
 `site/index.html` explains every lesson in plain language, with widgets
 drawn from **your own runs**. Lessons save their numbers to `outputs/results/`
 when they run (the training runs are too slow to repeat just for the page):
@@ -65,6 +67,9 @@ when they run (the training runs are too slow to repeat just for the page):
 bash run_all.sh                  # runs every lesson, then site/build_data.py
 open site/index.html             # works offline, no server needed
 ```
+
+Maintainers: `bash site/publish_pages.sh` copies the built page to the
+`gh-pages` branch, which GitHub Pages serves. `main` stays source-only.
 
 ## Setup
 
@@ -127,6 +132,7 @@ site/
   js/ui.js                        shared widgets (bars, charts, chips)
   js/part1.js part2.js part3.js   one file of widgets per part
   build_data.py                   collects outputs/results/*.json into site/data/results.js
+  publish_pages.sh                publishes the built site to GitHub Pages
 outputs/                          figures, results, and the checkpoints of models you train
 requirements.txt
 run_all.sh
