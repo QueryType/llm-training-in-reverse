@@ -117,10 +117,21 @@ else:
     R["stages"] = st
 
 # %% [markdown]
-# Even for this small model, **activations dominate**: every layer keeps its
-# inputs, attention outputs and MLP intermediate values until the backward
-# pass needs them (lesson 07). They grow with batch size and context length;
-# the weights don't.
+# Read the counter step by step:
+#
+# | stage | MB | what was added |
+# |---|---|---|
+# | weights | 47 | 12.2M × 4 bytes |
+# | after forward | 1,988 | **1,941 MB of activations** kept for backward |
+# | after backward | 94 | activations freed, 47 MB of gradients added |
+# | after optimizer step | 188 | Adam's m and v: 2 × 47 MB |
+#
+# The 16 bytes per parameter from the table above are all there (188 MB =
+# 4 × 47), and they're dwarfed by the activations: **41× the weights**, at
+# the peak of the forward pass. Every layer keeps its inputs, attention
+# outputs and MLP intermediate values until the backward pass needs them
+# (lesson 07). They grow with batch size and context length; the weights
+# don't.
 
 # %%
 if R["stages"] is not None:
@@ -134,10 +145,14 @@ if R["stages"] is not None:
     R["activations"] = act_rows
 
 # %% [markdown]
+# Activations are exactly proportional to the batch: 244 MB at 4, doubling
+# with every doubling, 3,881 MB at 64.
+#
 # **Activation checkpointing** keeps only each layer's *input* and recomputes
-# the rest during backward. Memory drops a lot, at the price of an extra
-# forward pass (we time it below). It's the standard trick for fitting longer
-# contexts or bigger batches.
+# the rest during backward. Here it cuts activation memory **8.2×** (1,941 →
+# 236 MB at batch 32), at the price of an extra forward pass (we time it
+# below). It's the standard trick for fitting longer contexts or bigger
+# batches.
 #
 # ## Speed: how big should a batch be?
 
@@ -176,8 +191,14 @@ R["speed"] = speed_rows
 # %% [markdown]
 # Small batches waste the hardware: each step has fixed costs (launching
 # hundreds of GPU kernels, the optimizer touching every weight), and a GPU
-# needs a lot of parallel work to be busy. Throughput rises with batch size,
-# then flattens once the device is full.
+# needs a lot of parallel work to be busy. Batch 1 manages 20k tokens/s;
+# batch 8 reaches 36k, and from there it's flat (35–36k up to batch 64): the
+# device is full. On a big NVIDIA GPU the curve keeps rising much longer,
+# because there's far more parallel hardware to fill.
+#
+# So past batch 8, a bigger batch doesn't make training faster per token. It
+# only changes how many tokens go into each step, which is an optimisation
+# choice (lesson 09), not a speed one.
 #
 # ## Gradient accumulation: a big batch in small pieces
 #
@@ -201,6 +222,11 @@ R["accum"] = {"max_diff": diff, "max_grad": gmax}
 del m1, m2
 
 # %% [markdown]
+# Largest gradient 0.105, largest difference 3.9e-7: identical up to float32
+# rounding. The `/4` matters: `cross_entropy` *averages* over its batch, so
+# four small averages must be divided by four to add up to one big average.
+# Forget it and you've silently multiplied the learning rate by 4.
+#
 # ## Trading speed for memory, and precision for speed
 
 # %%
@@ -220,10 +246,15 @@ for name, dt_ in (("bf16 autocast", torch.bfloat16), ("fp16 autocast", torch.flo
 R["precision"] = rows
 
 # %% [markdown]
+# On this M4 Pro: checkpointing costs 1.31× in time (34.6k → 26.4k
+# tokens/s), the price of the extra forward pass. bf16 and fp16 autocast
+# change nothing (1.01× and 1.00×).
+#
 # On NVIDIA GPUs, bf16 runs on tensor cores and is typically 2–3× faster than
 # fp32 for models this shape (more for bigger models). On Apple Silicon the
 # gain is small or none: MPS doesn't have the same fast low-precision
-# matrix units. Mixed precision is a big win on the hardware it was designed for.
+# matrix units. Mixed precision is a big win on the hardware it was designed
+# for. Run this lesson on a CUDA machine to see the difference.
 #
 # ## How close are we to the hardware's limit?
 #
@@ -247,6 +278,13 @@ else:
 print("  Large training runs reach 30-50% MFU. Tiny models reach much less: fixed costs dominate.")
 R["mfu"] = {"params": n, "tokens_per_s": best, "achieved_tflops": achieved / 1e12}
 
+# %% [markdown]
+# We reach 2.6 TFLOP/s. Against the M4 Pro GPU's rough fp32 peak of ~9
+# TFLOP/s that's about 30% MFU, decent for a 12M model, whose matrices are
+# small (384 wide) and whose fixed per-step costs are large relative to the
+# maths. Lesson 11's training loop ran at 31k tokens/s, a little below this
+# benchmark's best, because it also pays for evaluation probes and logging.
+
 # %%
 fig, axs = plt.subplots(1, 2, figsize=(12, 3.4))
 axs[0].plot([r["batch"] for r in speed_rows], [r["tokens_per_s"] / 1e3 for r in speed_rows], "o-")
@@ -267,6 +305,18 @@ show_fig(fig, "12_memory_speed")
 # * Small models can't keep a GPU busy. That's the reason big models are
 #   trained with big batches, and it's what lesson 13's "compute budget" is really
 #   about: FLOPs, not steps.
+#
+# ## What we know so far
+#
+# * For our model, one training step at batch 32 peaks at ~2 GB, and 98% of it
+#   is activations.
+# * Memory and time trade against each other; the maths of the step doesn't
+#   have to change (accumulation is exact).
+# * Our laptop does ~2.6 TFLOP/s of useful training work, so a compute budget
+#   in FLOPs translates directly into minutes.
+#
+# Next question: given a fixed budget of FLOPs, **should we spend it on a
+# bigger model or on more tokens?**
 
 # %%
 save_result("12_memory_and_speed", R)

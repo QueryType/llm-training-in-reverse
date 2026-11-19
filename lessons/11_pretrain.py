@@ -52,6 +52,12 @@ R["config"] = {"d": D, "layers": LAYERS, "heads": HEADS, "ctx": CTX, "batch": BA
                "params": n_all, "emb_params": n_emb, "device": device}
 
 # %% [markdown]
+# 12.2M parameters, 1.6M of them in the embedding table (4,096 tokens × 384,
+# shared with the output layer: "tied"). That's 11× smaller than SmolLM2-135M
+# and 6× smaller than Pythia-70m. 2,700 steps × 8,192 tokens = 22M tokens, 10%
+# of lesson 10's stream: no window is ever seen twice, so there's no
+# memorising and train loss ≈ val loss throughout.
+#
 # ## A quick learning-rate check
 #
 # Lesson 09 found 1e-3 for a model 15× smaller. Bigger models often want a
@@ -96,6 +102,10 @@ print(f"  -> using peak lr {LR:g}")
 R["lr_check"] = {str(k): v for k, v in lr_check.items()}
 
 # %% [markdown]
+# 1e-3 wins again (3.81 vs 4.08 at 3e-4 and 3.96 at 3e-3). A 150-step check
+# is crude (it favours rates that are fast early), but it reliably rules out
+# the bad end of the range, which is what lesson 09 says matters most.
+#
 # ## Probes, like lesson 05
 #
 # While it trains we stop every so often and run lesson 05's probes on our own
@@ -180,6 +190,30 @@ axs[1].set_xscale("symlog", linthresh=50); axs[1].set_xlabel("step"); axs[1].set
 show_fig(fig, "11_pretrain")
 
 # %% [markdown]
+# The run took 12.1 minutes on an M4 Pro (about 31k tokens/s). Read the tape
+# of samples from "Once upon a time, there was a little" and compare it with
+# Pythia's in lesson 05:
+#
+# | step | val loss | sample |
+# |---|---|---|
+# | 0 | 8.39 | "throwked hedgembre marble leaartyard…" (random tokens; ln 4096 = 8.32) |
+# | 50 | 5.68 | "too and to, a to. She his the in in He." (frequent words) |
+# | 100 | 4.40 | "too She to hurt a big man and his the pretty in the best…" (real words, no grammar) |
+# | 200 | 3.47 | "mouse who was filled a big man and his friends wanted to go. One day, …" (phrases) |
+# | 300 | 3.10 | "girl named Milly. She loved to play outside in her toy." (sentences) |
+# | 800 | 2.44 | "girl named Lily. One day, she went outside in her backyard." (story shape) |
+# | 2,700 | 1.92 | "girl who was very brave. She always wanted to try new things. …" |
+#
+# The same order as Pythia: frequent tokens → real words in salad → phrases
+# → grammar → story structure. It's fast here (a recognisable story by step
+# 300, 2.5M tokens) because TinyStories is a tiny, regular world.
+#
+# Most of the drop is early again: by step 500 (19% of training) the loss
+# has fallen 88% of the way from 8.39 to 1.92. And the last steps still help:
+# 1.97 at step 2,200 → 1.92 at 2,700, partly from the cosine decay
+# (lesson 09). Train loss over the last 100 steps averages 1.93: no
+# overfitting, as expected when no window repeats.
+#
 # ## Stories
 #
 # Sampling at temperature 0.8 from a few different openings.
@@ -210,24 +244,51 @@ print("  (lesson 06's numbers are from its own run; see outputs/results/06_what_
 R["final_bpc"] = final_bpc
 
 # %% [markdown]
+# | model | params | bits/char on TinyStories val |
+# |---|---|---|
+# | char 8-gram (lesson 06) | – | 1.33 |
+# | Pythia-70m final | 70M | 0.97 |
+# | SmolLM2-135M | 135M | 0.66 |
+# | **ours, 12 minutes** | 12M | **0.69** |
+#
+# (Ours is converted with lesson 10's 4.00 characters per token. Lesson 06's
+# validation text still included the 30% of stories that also appear in
+# train, so the comparison isn't perfectly like-for-like; the gap is too large
+# for that to matter for Pythia, and too small to call a win against SmolLM2.)
+#
+# The stories have characters, dialogue, a problem and an ending ("From that
+# day on…", "The end."). They also have the tell-tale glitches of a small
+# model: "showed thes to all owner", a "laser" found in a box and hugged, a
+# girl who "haveve" her treasure, a dog who disappears from his own story.
+# Grammar and story shape are learned; keeping track of *what is going on* is
+# not, yet.
+#
 # **Aha:**
-# * A model 11× smaller than SmolLM2, trained for about 10 minutes on a laptop,
+# * A model 11× smaller than SmolLM2, trained for 12 minutes on a laptop,
 #   writes simple, mostly coherent stories with dialogue and a plot. On
-#   TinyStories it comes close to SmolLM2-135M in bits per character, a model
-#   trained on trillions of tokens of everything. Specialists get far on their
-#   own turf (lesson 03 found the same for chat).
+#   TinyStories it beats Pythia-70m clearly and comes close to SmolLM2-135M
+#   (0.69 vs 0.66 bits/char), a model trained on trillions of tokens of
+#   everything. Specialists get far on their own turf (lesson 03 found the
+#   same for chat).
 # * Its samples went through Pythia's stages: frequent words, then word
 #   salad with real words, then local phrases, then grammar, then story
 #   structure ("One day, ...").
-# * One stage is missing: the copy test barely improves (the second copy is
-#   only a little cheaper than the first). TinyStories almost never repeats a
+# * One stage is missing: the copy test barely improves (the second copy costs
+#   1.75 nats vs 1.92 for the first; final Pythia: 0.55 vs 4.99 on real text). TinyStories almost never repeats a
 #   passage, so there is little reward for learning to copy, while web text
 #   (Pythia's data) is full of repetition. **What a model learns depends on what
 #   its data rewards.**
 #
-# Ten minutes is short: the loss was still falling. Lesson 12 asks what limits
-# the speed; lesson 13 asks whether a different size would have done better
-# with the same compute.
+# ## What we know so far
+#
+# * The whole pipeline (tokenizer, data, Llama model, AdamW, warmup + cosine,
+#   clipping) fits in one script and trains a working base model in minutes.
+# * It learns in the same order Pythia did, compressed into 2,700 steps.
+# * Its abilities follow its data: stories yes, copying barely.
+#
+# Twelve minutes is short: the loss was still falling. Lesson 12 asks what
+# limits the speed and the size; lesson 13 asks whether a different size
+# would have done better with the same compute.
 
 # %%
 save_result("11_pretrain", R)

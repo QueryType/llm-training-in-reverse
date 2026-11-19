@@ -13,6 +13,12 @@
 # Questions: **how does BPE decide what a token is? How big should the
 # vocabulary be? And what can go wrong with the data before training even
 # starts?**
+#
+# This is the first lesson of Part 3, where we rebuild the pipeline forwards:
+# data (this lesson) → pretraining (11) → making it fit and fast (12) →
+# choosing the model size (13) → turning it into a chat model (14). The data
+# is TinyStories: 2.1 million short stories written by GPT-3.5 and GPT-4 in
+# simple English.
 
 # %%
 import os, sys, collections, hashlib
@@ -82,10 +88,19 @@ R["scratch_merges"] = [[a, b, f] for a, b, f in merges]
 R["scratch_sizes"] = [s / n_chars for s in sizes]
 
 # %% [markdown]
-# The first merges are the most common letter pairs ("e" after a space, "he",
-# " t"…), then whole common words (" the", " and", " was"), then story
-# words (" Lily", " happy"). After 300 merges the text is a bit more than
-# half as long. Each merge helps less than the one before.
+# The first merges are the most common letter pairs: "he" (76,537 times),
+# " t", " a", " s", " w", "nd". By merge 7 we have the first whole word,
+# " the" (" t" + "he"), and by merge 10 " and". Later merges are rarer pieces
+# and story words: merge 200 is " wanted" (1,730 times).
+#
+# Each merge helps less than the one before. The first one shortens the text
+# by 2.9%; after 100 merges it's at 54% of its length in characters, after
+# 300 merges at 40%. The merges that remain to be found are rarer and rarer
+# pairs.
+#
+# Notice that the leading space is part of the token: " the" and "the" are
+# different tokens. That's how almost every modern tokenizer works, and it's
+# why tokens printed by `tokenizers` start with "Ġ" (its symbol for a space).
 #
 # ## The real thing, at several vocabulary sizes
 #
@@ -130,16 +145,25 @@ print(f"  SmolLM2's tokenizer (49,152, trained on the whole web): {len(probe_tex
 R["vocab_sizes"], R["smol_chars_per_token"] = vocab_rows, len(probe_text) / n_smol
 
 # %% [markdown]
-# Compression improves quickly up to a few thousand tokens and then slowly:
-# TinyStories only uses about 1,500 distinct words. SmolLM2's 49k-token
-# vocabulary compresses this text *no better* than our small one, because
-# most of its tokens are for code, other languages and rare words that never
-# appear here, and its embedding table alone would be bigger than lesson 11's
-# whole model.
+# | vocab | 512 | 1,024 | 2,048 | 4,096 | 8,192 | 16,384 | SmolLM2 (49,152) |
+# |---|---|---|---|---|---|---|---|
+# | chars/token | 2.35 | 3.11 | 3.66 | 4.00 | 4.17 | 4.21 | 4.14 |
+#
+# Compression improves quickly up to a few thousand tokens and then barely
+# moves: 8k → 16k gains less than 1%. TinyStories was generated from a small
+# basic vocabulary (the TinyStories paper used about 1,500 words a young
+# child knows), so a few thousand tokens cover nearly every word whole.
+#
+# SmolLM2's 49k-token vocabulary, trained on the whole web, compresses this
+# text about as well as our 8k one (4.14 vs 4.17). Most of its tokens are
+# for code, other languages and rare words that never appear here, and at
+# lesson 11's width its embedding table alone (18.9M parameters) would be
+# bigger than lesson 11's whole model.
 #
 # **We pick 4,096.** About 4 characters per token, so a 256-token window
-# holds ~1,000 characters (most of a story), and the embedding table stays
-# small.
+# holds ~1,000 characters (more than a median story, 786 characters), and the
+# embedding table stays small (1.6M parameters). Doubling to 8,192 would buy
+# 4% shorter sequences for twice the table.
 
 # %%
 VOCAB = 4096
@@ -157,6 +181,11 @@ R["example"] = {"text": example, "tokens": enc.tokens, "ids": enc.ids}
 R["longest_tokens"] = sorted(tk.get_vocab(), key=len, reverse=True)[:20]
 
 # %% [markdown]
+# The example sentence is 19 tokens, one per word or punctuation mark: at
+# this vocabulary size every word in it is a single token. The longest tokens
+# are words like " uncomfortable", " compassionate" and " caterpillar":
+# frequent enough in children's stories to earn their own entry.
+#
 # ## Look at the data before you train on it
 #
 # Two classic problems: **duplicates** (the model sees the same text many
@@ -178,6 +207,21 @@ R["checks"] = {"dups": dups, "most_repeated": most, "val_in_train": val_in_train
                "n_val": len(val_stories), "len_pct": [float(np.percentile(lens, q)) for q in (5, 25, 50, 75, 95)]}
 
 # %% [markdown]
+# Both problems are real here:
+#
+# * **320,241 exact duplicates** in the training set (15.1% of 2.1M
+#   stories); no story appears more than 3 times, so it's many stories
+#   duplicated once rather than a few repeated thousands of times.
+# * **6,601 of the 21,990 validation stories (30%) also appear in train**,
+#   word for word. A model that memorised them would score suspiciously well
+#   on validation, and we'd never know why.
+#
+# Neither is a scandal: TinyStories is a generated dataset, and a generator
+# asked for millions of short stories from a small vocabulary repeats itself.
+# Web-scale datasets have the same problems at a bigger scale, which is why
+# deduplication and decontamination are standard steps in every pretraining
+# pipeline.
+#
 # We remove the duplicates and the contaminated validation stories, so our
 # validation loss in lessons 11–14 measures generalisation, not memory.
 
@@ -232,6 +276,14 @@ print("\n  a 64-token window from the stream ('|' marks token boundaries):")
 print("  " + "|".join(tk.decode([i]) if i != EOT else "⟨EOT⟩" for i in window))
 R["window"] = [tk.decode([i]) if i != EOT else "<|endoftext|>" for i in window]
 
+# %% [markdown]
+# 1M stories become 229M training tokens (about 229 per story) and the
+# cleaned validation set 3.3M tokens. Stored as `uint16` (4,096 < 65,536),
+# the training stream is 457 MB on disk, read with `np.memmap` so it never has
+# to fit in memory. In the window above, "…helping others." is followed by
+# `<|endoftext|>` and then "Once upon a time": the model sees story boundaries
+# inside its windows and has to learn to start over.
+
 # %%
 fig, axs = plt.subplots(1, 2, figsize=(12, 3.4))
 axs[0].plot(range(len(sizes)), [s / n_chars for s in sizes])
@@ -247,8 +299,19 @@ show_fig(fig, "10_tokenizer")
 #   common pair, repeat. Its vocabulary reflects what it was trained on.
 # * A tokenizer for a narrow domain can be tiny. Vocabulary size is a trade:
 #   shorter sequences vs a bigger embedding table and rarer tokens.
-# * Check the data. Duplicates and test-set leaks are easy to find and easy to
-#   miss, and they quietly inflate your results.
+# * Check the data. Duplicates (15% here) and test-set leaks (30% of
+#   validation here) are easy to find and easy to miss, and they quietly
+#   inflate your results.
+#
+# ## What we know so far
+#
+# * Tokens are learned from the data: BPE merges the most common pair, again
+#   and again, and stops at the vocabulary size you chose.
+# * For narrow text, a small vocabulary compresses as well as a big one.
+# * Real data needs cleaning before training, even when it looks clean.
+#
+# Next: we have 229M tokens, a tokenizer and everything from Part 2. **Can we
+# pretrain a model ourselves, from random weights, in about ten minutes?**
 
 # %%
 save_result("10_tokenizer_and_data", R)

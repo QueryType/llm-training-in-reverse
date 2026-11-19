@@ -143,6 +143,13 @@ print(f"  e.g. {before['examples'][0]['ask']!r}\n       → {before['examples'][
 R["base_rate"], R["before"] = base_rate, before
 
 # %% [markdown]
+# 10,953 conversations fit in the 256-token window; 300 are held out for
+# testing. (We use the *validation* file of TinyStoriesInstruct: it's small,
+# and lesson 11 never trained on it, so none of these stories are memorised.)
+#
+# Before SFT: requested words used **7%** (a random story from the data
+# scores 4%, so that's barely above chance), stops by itself **0%**.
+#
 # Before SFT, the model has never seen `<|im_start|>` or `<|im_end|>`: they
 # never appeared in lesson 11's token stream. So it ignores the request,
 # writes *a* story (sometimes starting with the moral, sometimes several in a
@@ -190,6 +197,11 @@ for step in range(1, STEPS + 1):
               f"  test {log['test'][-1]:.3f}  ({time.perf_counter() - t0:.0f}s)")
 R["log"] = log
 
+# %% [markdown]
+# Test loss on the story tokens: 2.01 → 1.80 after 100 steps → 1.63 after
+# 600. Like lesson 03, most of the drop comes early: the format is learned
+# first. 600 × 16 = 9,600 conversations, less than one pass over the data.
+
 # %%
 after = grade(model, test)
 banner("After SFT")
@@ -229,13 +241,30 @@ axs[1].set_title("Following instructions")
 show_fig(fig, "14_chat")
 
 # %% [markdown]
+# | | before SFT | after SFT | measured on |
+# |---|---|---|---|
+# | requested words used | 7% | **35%** | 120 requests |
+# | stops by itself | 0% | **95%** | 120 requests |
+# | dialogue when asked | 73% | 80% | 30 requests |
+#
+# Read the three custom requests above with the words in mind. "Cat, rain
+# and umbrella" gets a cat and rain, no umbrella. "Dragon, cake and friend"
+# gets a lovely cake story, with no dragon. "Boat, storm and brave" gets a
+# brave boy, no boat, no storm, and no sad ending. Every story is fluent,
+# ends cleanly and is about *one* of the things asked for.
+#
+# One pattern worth checking: in all five saved test examples, the *first*
+# requested word is the one that's missing (act, stir, regret, guess, get).
+# Five examples prove nothing, but it's the kind of thing a real evaluation
+# would break down (see **Try**).
+#
 # **Aha:**
 # * The recipe from lesson 03 works unchanged on a model we built ourselves.
 #   SFT doesn't care where the base model came from.
 # * Our model now does something its pretraining never asked for. It ends its
-#   turn almost every time, and it uses the requested words far more often
-#   than chance, though far from always: a 12M model with 10 minutes of
-#   pretraining and 80 seconds of SFT follows instructions *partly*. Like
+#   turn almost every time, and it uses the requested words 5× more often
+#   than before, though far from always: a 12M model with 12 minutes of
+#   pretraining and 600 steps of SFT follows instructions *partly*. Like
 #   lesson 03, SFT taught **format and role**; the story-writing came from pretraining.
 # * The dialogue number is the shakiest one. It's measured on only the few
 #   dozen requests that asked for dialogue, most stories contain dialogue
@@ -245,6 +274,25 @@ show_fig(fig, "14_chat")
 # * Having a checkable instruction (words, dialogue) turns "seems better" into
 #   a number. That's the core of every instruction-following benchmark, and
 #   it's what you'd need to try lesson 04's DPO here too.
+#
+# ## The whole course, in one table
+#
+# | lesson | question | answer, measured |
+# |---|---|---|
+# | 01 | what does post-training change? | format and role, not size: same 134.5M weights |
+# | 02 | how much did the weights move? | 8.6%, everywhere, in a direction that matters |
+# | 03 | where does "answering" come from? | 200 steps of SFT on 2k chats |
+# | 04 | and preferences? | DPO learns what the labels measure (length), at a hidden cost |
+# | 05 | where does knowledge come from? | pretraining, in a fixed order; copying switches on suddenly |
+# | 06 | what does the loss mean? | average surprise; compare in bits per character |
+# | 07 | what's a gradient? | softmax − one_hot, chained back; checkable by hand |
+# | 08 | why Adam? | per-weight step sizes; >1 nat better than SGD here |
+# | 09 | why does lr matter? | narrow sweet spot; warmup, decay, clipping |
+# | 10 | where does data come from? | BPE + dedup + decontamination |
+# | 11 | can we pretrain? | 12M params, 12 min, 0.69 bits/char |
+# | 12 | what limits training? | activations (98% of memory here), and hardware |
+# | 13 | how big a model? | ~20 tokens per parameter for a fixed budget |
+# | 14 | can ours chat? | yes, partly: stops 95%, uses 35% of asked words |
 #
 # The whole pipeline, end to end, is now yours: data → tokenizer → pretraining → SFT.
 
@@ -257,6 +305,8 @@ save_result("14_make_it_chat", R)
 #   more of the requested words. Does the words score go up further?
 # * Add a new instruction type the data supports: "Use this sentence: …" (the
 #   records have a "Random sentence" field).
+# * Grade more requests (`grade(model, test, n=300)`) and split the words score
+#   by position in the list. Is the first word really missed more often?
 # * Ask for things outside the training data ("Write a poem", "What is 2+2?").
 #   What does a 12M story model do?
 # * Look inside it with *Transformers, Inside Out*: `MODEL_ID=outputs/checkpoints/14_chat`

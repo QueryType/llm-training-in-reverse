@@ -128,8 +128,10 @@ print(f"  same top-1 prediction at {agree:.1%} of positions")
 R["port"] = {"max_diff": float(diff), "top1_agree": float(agree)}
 
 # %% [markdown]
-# Same function, to float32 rounding. The architecture is the whole model:
-# the weights move between frameworks as plain arrays.
+# Largest logit difference 2.5e-5, same top-1 prediction at 100% of the 128
+# positions: the same function, to float32 rounding (the two frameworks add
+# up the same numbers in a different order). The architecture is the whole
+# model: the weights move between frameworks as plain arrays.
 #
 # ## Train from scratch in MLX
 #
@@ -212,6 +214,22 @@ if at:
     print(f"  val loss at step {at[-1]['step']}: PyTorch {at[-1]['val']:.3f}, MLX "
           f"{min(curve, key=lambda c: abs(c[0] - at[-1]['step']))[1]:.3f}")
 R["pytorch_tokens_per_s"] = pt_tps
+
+# %% [markdown]
+# On an M4 Pro: MLX trains at **43.5k tokens/s** against PyTorch-MPS's 35.3k
+# (lesson 12's clean batch-32 measurement): **1.23× faster**, for the same
+# model and the same maths. 600 steps took 113 seconds.
+#
+# The losses don't match step for step, though:
+#
+# | step | 100 | 200 | 300 | 500 |
+# |---|---|---|---|---|
+# | PyTorch (lesson 11) | 4.40 | 3.47 | 3.10 | 2.72 |
+# | MLX | 4.00 | 3.26 | 2.95 | 2.64 |
+#
+# Same batches, same schedule, same optimizer settings, and MLX is ahead
+# throughout, by less as training goes on. (The two use slightly different
+# validation samples, which explains a few hundredths, not 0.4.)
 
 # %%
 ids = tok("Once upon a time, there was a little").input_ids

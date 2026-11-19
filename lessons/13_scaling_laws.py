@@ -102,6 +102,24 @@ for C in BUDGETS:
 R["runs"] = runs
 
 # %% [markdown]
+# Thirteen runs, 4.4 minutes in total. At the smaller budget (1e13 FLOPs):
+#
+# | N | 0.16M | 0.25M | 0.36M | 0.73M | 1.33M | 2.56M | 5.72M |
+# |---|---|---|---|---|---|---|---|
+# | tokens/param | 67 | 26 | 13 | 3 | 1 | 0.5 | 0.1 |
+# | val loss | 3.24 | 3.14 | **3.14** | 3.36 | 3.70 | 4.21 | 5.49 |
+#
+# and at 4× the budget (4e13):
+#
+# | N | 0.36M | 0.73M | 1.33M | 2.56M | 5.72M | 12.2M |
+# |---|---|---|---|---|---|---|
+# | tokens/param | 52 | 13 | 4 | 1 | 0.2 | 0.1 |
+# | val loss | 2.74 | **2.63** | 2.77 | 3.03 | 4.01 | 4.59 |
+#
+# Both are U-shapes. With the same FLOPs, the 5.7M model is far worse than a
+# model 16× smaller: it only got 71 steps. And the bottom moves right as the
+# budget grows: the best measured size doubles from 0.36M to 0.73M.
+#
 # ## Find the bottom of each curve
 #
 # For each budget, loss vs log(N) is roughly a parabola (an "IsoFLOP curve").
@@ -144,6 +162,17 @@ axs[1].set_title("More compute, lower loss (colour = size)")
 show_fig(fig, "13_scaling")
 
 # %% [markdown]
+# The fitted optima: **0.32M parameters at 1e13** (16 tokens per parameter)
+# and **0.58M at 4e13** (20 tokens per parameter). With two budgets, the
+# best size grows like C^0.42, between Chinchilla's C^0.5 and Kaplan's
+# C^0.73... and with two points, "grows like" is a generous description.
+#
+# One honest caveat about the right-hand side of the curves: a 5.7M model on
+# a 1e13 budget gets only 71 steps, part of them warmup. Some of its high loss
+# is "too few optimizer steps", not just "too few tokens per parameter". Real
+# scaling studies use much larger budgets, where even the biggest models get
+# thousands of steps.
+#
 # ## The schedule detail that changed the answer
 #
 # Kaplan et al. trained models with a long schedule and read off the loss at
@@ -181,10 +210,18 @@ print(f"  schedule sized for 4×, stopped early: {too_long:.3f}   (+{too_long - 
 R["schedule_test"] = {"params": cfg["params"], "budget": C, "steps": steps, "matched": matched, "too_long": too_long}
 
 # %% [markdown]
+# Same model (0.73M), same 2,242 steps, same data. The only difference is
+# whether the cosine schedule had reached its end: 2.629 when it had, 2.695
+# when it was sized for 4× the steps and still at a high learning rate.
+# **+0.066 nats**, just from the schedule. In Kaplan-style measurements, every
+# run except the longest one is caught mid-schedule like this, and the
+# penalty is largest for the short runs of big models. That made big models
+# look better than they were.
+#
 # **Aha:**
 # * For a fixed compute budget there is a best model size: too small can't
-#   absorb the data, too big doesn't see enough of it. The curve is flat near the
-#   bottom, so being 2× off costs little; being 10× off costs a lot.
+#   absorb the data, too big doesn't see enough of it. Near the bottom it's
+#   forgiving (2× off costs ~0.1–0.2 nats here); 10× off costs a nat or more.
 # * The best size grows with the budget, and the tokens-per-parameter ratio at
 #   the optimum lands in Chinchilla's neighbourhood (~20), with models
 #   10,000× smaller than theirs on a single narrow dataset. Treat it with care:
@@ -194,13 +231,25 @@ R["schedule_test"] = {"params": cfg["params"], "budget": C, "steps": steps, "mat
 #   run caught mid-schedule looks worse than it is, and that bias pushes you
 #   towards bigger models.
 #
-# And lesson 11? Its 12M model trained on 22M tokens: about 2 tokens per
+# And lesson 11? Its 12M model trained on 22M tokens: 1.8 tokens per
 # parameter, far to the "too big" side by this measure. Its compute,
 # 6 × 12.2M × 22M ≈ 1.6e15 FLOPs, would by ~20 tokens/param suggest a model of
 # about 4M parameters trained on ~70M tokens. (On our hardware small models
 # run fewer FLOP/s, lesson 12, so "same compute" isn't quite "same ten minutes".) (Real labs often
 # go the other way on purpose, training *past* the optimum, because a smaller
 # model that's been trained longer is cheaper to run afterwards.)
+#
+# ## What we know so far
+#
+# * Compute is the budget: C ≈ 6ND, and every split of it between N and D is
+#   a different model.
+# * The best split can be measured with a handful of small runs (IsoFLOP
+#   curves), and here it lands near Chinchilla's ~20 tokens per parameter.
+# * Fair comparisons need schedules that end where the run ends.
+#
+# Our model from lesson 11 writes stories, but it's a *base* model, like
+# SmolLM2-135M in lesson 01: it continues text. The last step closes the
+# circle: **can we turn it into a chat model with lesson 03's SFT?**
 
 # %%
 save_result("13_scaling_laws", R)
