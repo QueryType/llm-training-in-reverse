@@ -6,8 +6,20 @@
 # if this one weight were nudged up a tiny bit.** Then the optimizer moves
 # each weight a little in the direction that lowers the loss.
 #
+# Lesson 06 told us what the loss measures. This lesson is about the one
+# piece of information training gets back from it: a number per weight
+# saying which way to move.
+#
 # Questions: **what exactly is in `p.grad`? Can we compute it ourselves and
 # check PyTorch? And what does one step along it actually do?**
+#
+# The plan, from small to real:
+# 1. one weight, where we can do the calculus on paper;
+# 2. the softmax + cross-entropy gradient, the one every language model uses;
+# 3. a tiny network with its backward pass written out by hand;
+# 4. a real (tiny) Llama, checked weight by weight with finite differences;
+# 5. one step along the gradient, with many step sizes;
+# 6. what backward costs in time.
 #
 # Part 2 uses tiny models on the *characters* of TinyStories (lesson 06's
 # data), so every experiment runs in seconds.
@@ -46,6 +58,15 @@ print(f"  autograd:          w.grad             = {w.grad.item():.6f}")
 print("  -> negative: increasing w lowers the loss. The true answer is w = 2.")
 
 # %% [markdown]
+# All three agree: −9.0. The sign is the useful part. Negative means "loss
+# goes down if w goes up", so a step *against* the gradient moves w from 1.5
+# towards 2. The size says how steep the slope is here, not how far to go.
+#
+# The finite difference is our ground truth for the rest of the lesson: it
+# needs no calculus, only two forward passes, so it can check any gradient.
+# It's far too slow to train with (two forward passes *per weight*), which is
+# why backprop exists.
+#
 # ## The most important gradient in language modelling
 #
 # Our models end with `logits → softmax → −log P(correct token)`. The
@@ -71,6 +92,16 @@ print(f"  autograd:          {[round(v, 3) for v in logits.grad.tolist()]}")
 R["softmax_grad"] = {"logits": logits.tolist(), "p": p.tolist(), "grad": logits.grad.tolist(), "target": target}
 
 # %% [markdown]
+# The model gave the correct token #0 a probability of 0.22, so its gradient
+# is 0.22 − 1 = −0.78: push it up hard. Token #5 had 0.60 (the model's
+# favourite, and wrong), so it gets the biggest push down, +0.60. The
+# unlikely tokens barely move. The gradients add up to zero: the push is only
+# about *which token wins*, not about the overall level of the scores.
+#
+# This also explains lesson 03's loss masking. A token with label −100 is
+# left out of the loss, so its row of `softmax − one_hot` is simply never
+# computed and it sends no push at all.
+#
 # ## Backprop by hand: a tiny character model
 #
 # Now a real (tiny) network: previous character → embedding (16 numbers) →
@@ -125,7 +156,8 @@ for name, mine, t_ in zip(["E", "W1", "b1", "W2", "b2"], [d_E, d_W1, d_b1, d_W2,
 R["hand_backprop"] = hand_rows
 
 # %% [markdown]
-# Identical to the last digit. **Backprop isn't magic, it's bookkeeping**:
+# Identical to the last digit (differences of 1e-17, the rounding error of
+# float64). **Backprop isn't magic, it's bookkeeping**:
 # keep every intermediate from the forward pass, then walk backwards
 # multiplying by the local derivative of each step. Autograd writes those
 # lines for you, for any model, including a transformer.
@@ -133,6 +165,11 @@ R["hand_backprop"] = hand_rows
 # Note what the backward pass needed: `hid`, `emb`, `probs`, the values from
 # the forward pass. That's why training uses much more memory than
 # inference: every activation has to be **kept** until backward (lesson 12).
+#
+# Look at `d_E` too. Only the embedding rows of characters that appeared in
+# the batch get a gradient; every other row gets exactly zero. Rare
+# characters are rarely in a batch, so their embeddings are rarely trained.
+# Lesson 08 measures this on a real model.
 #
 # ## Checking a real transformer
 #
@@ -187,6 +224,17 @@ for name in ["model.embed_tokens.weight", "model.layers.0.self_attn.q_proj.weigh
 R["finite_diff"] = fd_rows
 
 # %% [markdown]
+# Every weight agrees with autograd to between 7 and 9 significant digits
+# (relative differences of 3e-9 to 9e-7), from the embedding to the final
+# norm. Autograd's chain rule through attention, RoPE, SwiGLU and RMSNorm is
+# right, and our check is good enough to see it.
+#
+# The RMSNorm detail is worth remembering. The first version of this check
+# failed, and the reason was Llama's norm quietly computing in float32 inside
+# a float64 model. Real training code is full of choices like this: where to
+# keep extra precision so that rounding doesn't eat the signal (lesson 12
+# comes back to number formats).
+#
 # ## What does one step do?
 #
 # The gradient says which way is downhill *right here*. Take one step of
@@ -227,13 +275,36 @@ ax.set_title("One gradient step: small helps, big hurts")
 show_fig(fig, "07_one_step")
 
 # %% [markdown]
+# The model starts at 4.52, close to ln 97 = 4.57 (a fresh model guesses
+# almost uniformly, lesson 06). The "straight-line guess" is what the
+# gradient promises: loss falls by η·‖grad‖² if the slope stayed the same
+# all the way.
+#
+# | η | 0.01 | 0.03 | 0.1 | 0.3 | 1 | 3 | 10 |
+# |---|---|---|---|---|---|---|---|
+# | same batch | 4.27 | 4.11 | 3.95 | **3.72** | 4.33 | 9.30 | 25.8 |
+# | other batch | 4.28 | 4.11 | 3.95 | **3.70** | 4.30 | 9.24 | 25.6 |
+# | straight line | 4.20 | 3.57 | 1.36 | −4.9 | −27 | −90 | −311 |
+#
+# Even at η = 0.01 the real drop (0.24) is only three-quarters of the
+# promise (0.32), and by η = 0.1 the promise is absurd. The slope changes as
+# soon as you move. The best single step is around η = 0.3; at η = 1 it
+# overshoots (still below the start, barely); at η = 3 the loss *doubles*.
+#
+# The surprise is the second row. The step was computed on one batch, yet the
+# other batch improves just as much, even slightly more at η = 0.3. At this
+# point the model knows nothing, so the first thing every gradient says is
+# "spaces and 'e' are common, 'Q' is rare", and that's true of every batch.
+# Later in training, the batch-specific part of each gradient gets larger
+# (that's the noise that lesson 09's learning-rate decay deals with).
+#
 # **Aha:**
-# * The gradient is only a *local* promise. For small η the loss drops about as
-#   predicted. Past some size, the step overshoots and the loss goes *up*. Too
-#   big a step can make things much worse in a single update.
-# * A step computed on one batch also lowers the loss on a *different* batch,
-#   by less. That's the whole reason training works: the batches share
-#   structure, so a step for one is (mostly) a step for all.
+# * The gradient is only a *local* promise. It overstates the drop even for
+#   small steps, and past some size the step overshoots and the loss goes
+#   *up*. One step that's 10× too big can undo everything.
+# * A step computed on one batch lowers the loss on a *different* batch too.
+#   That's the whole reason training works: the batches share structure, so
+#   a step for one is (mostly) a step for all.
 # * Choosing η is the subject of lesson 09. Choosing a smarter direction than
 #   plain −grad is lesson 08.
 #
@@ -273,10 +344,31 @@ print("     Small models often measure more than 3×: fixed costs (launching GPU
 print("     activations around) don't shrink with the model the way the matrix maths does.")
 R["timing"] = {"device": device, "fwd_ms": tf * 1000, "fwd_bwd_ms": tb * 1000, "params": n_params(model)}
 
+# %% [markdown]
+# On this run (MPS, a 4.7M-parameter model), forward + backward took about
+# 4× a forward pass. Either way, the rule of thumb holds: a training step
+# costs roughly three forward passes' worth of arithmetic, which is where
+# lesson 13's "6 × parameters × tokens" comes from (2 for forward, 4 for
+# backward, per parameter per token).
+
 # %%
 save_result("07_gradients", R)
 
 # %% [markdown]
+# ## What we know so far
+#
+# * `p.grad` = how much the loss changes per unit nudge of `p`, measured
+#   exactly by backprop and checkable with finite differences.
+# * For a language model, it starts as `softmax − one_hot` at the output and
+#   flows backwards through every layer by the chain rule.
+# * Backward needs every activation from the forward pass and costs about
+#   twice the forward.
+# * One step along −grad helps if it's small and hurts if it's big, and it
+#   helps other batches too.
+#
+# Next question: plain `w − η·grad` is what we just did. Real training uses
+# **Adam**. What does it do differently, and does it matter?
+#
 # ## Try:
 # * In the hand-written backward, replace `tanh` with ReLU. Which line changes?
 # * Make ε in the finite-difference check bigger (1e-2) and smaller (1e-10). Why

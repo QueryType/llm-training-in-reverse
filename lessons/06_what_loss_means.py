@@ -3,7 +3,8 @@
 #
 # Every lesson so far printed a "loss": 2.19 → 1.18 in lesson 03, 10.8 at
 # Pythia's step 0 in lesson 05. Training is nothing more than pushing that
-# number down, so it's worth knowing exactly what it measures.
+# number down, so before we look at *how* it gets pushed (lessons 07–09) it's
+# worth knowing exactly what it measures, and what a good value looks like.
 #
 #     loss = average over tokens of  −log P(the real next token)
 #
@@ -15,8 +16,14 @@
 # counting? How do you compare losses between models with different
 # tokenizers? And how close are real models to "perfect"?**
 #
-# We use TinyStories (short, simple children's stories), the dataset we'll
-# pretrain on in Part 3.
+# We use TinyStories (short, simple children's stories written by GPT-3.5
+# and GPT-4), the dataset we'll pretrain on in Part 3: 60,000 training
+# stories (53.5M characters) for counting, 2,000 validation stories (1.6M
+# characters) for scoring. Its alphabet is 97 characters.
+#
+# The plan is a **ladder**: score many models on the same validation text,
+# from "knows nothing" through "just counts" to real neural networks, all in
+# one unit, so we can see where each kind of knowledge comes in.
 
 # %%
 import os, sys
@@ -48,6 +55,12 @@ R = {"char_vocab": V}
 # * **bits per character** = total bits / number of characters. A tokenizer
 #   that makes fewer, bigger tokens has a higher loss *per token*, but it's
 #   predicting more text per token. Per character, the comparison is fair.
+#
+# Why a logarithm at all? Because probabilities of a whole text *multiply*:
+# P(story) = P(token 1) · P(token 2 | token 1) · … . Logs turn that product
+# into a sum, and the average of the sum is the loss. So a loss of L nats per
+# token means the model gives a 1,000-token text probability e^(−1000·L).
+# Lower loss = the real text looked more likely to the model.
 
 # %%
 banner("One loss, four ways of writing it")
@@ -55,6 +68,11 @@ for nats in (10.8, 4.0, 2.0, 1.0):
     print(f"  {nats:5.2f} nats/token = {nats / math.log(2):5.2f} bits/token = perplexity {math.exp(nats):9,.1f}")
 
 # %% [markdown]
+# Notice the first row: 10.8 nats is a perplexity of about 49,000, which is
+# roughly SmolLM2's vocabulary size (49,152). That's no coincidence, as the
+# next section shows. And 1 nat (perplexity 2.7) means "as unsure as choosing
+# between about three tokens".
+#
 # ## Rung 0: know nothing
 #
 # A model that knows nothing gives every token the same probability 1/V.
@@ -120,10 +138,17 @@ for n in (1, 2, 3, 4, 5, 6, 7, 8, 10, 12, 16):
 R["ngrams"] = ngram_rows
 
 # %% [markdown]
-# Counting works surprisingly well, up to a point. Then two numbers split:
-# on the text it was counted from, the n-gram model keeps getting better
-# (it's memorising), while on new text it gets *worse*. Longer contexts have
-# been seen fewer times, until most of them were never seen at all.
+# Counting works surprisingly well, up to a point. Knowing only how common
+# each letter is (n=1) already takes us from 6.60 to 4.40 bits per character.
+# Each extra character of context helps: 3.31 (n=2), 2.44 (n=3), 1.56 (n=5).
+# The best is **1.33 bits/char at n=7–8**: a lookup table of 6–7 previous
+# characters.
+#
+# Then the two columns split. On the text it was counted from, the n-gram
+# model keeps getting better, 1.02 at n=10 and 0.86 at n=16 (it's memorising).
+# On new text it gets *worse*: 1.51 at n=10, 3.06 at n=16, worse than a
+# 3-gram. A 15-character context is usually a phrase the table has never
+# seen, so it has nothing to say and falls back on the smoothing pseudo-count.
 #
 # That's **overfitting** in its purest form, and it's the reason we always
 # measure loss on held-out text. To do better, a model must **generalise**:
@@ -167,12 +192,29 @@ for n, name in ((0, "uniform over 49,152 tokens"), (1, "token unigram"), (2, "to
 R["token_ngrams"], R["chars_per_token"] = tok_rows, chars_per_token
 
 # %% [markdown]
-# A uniform guess over 49k tokens is *worse* per character than a uniform
-# guess over 97 characters, but a token **bigram** beats a character 3-gram:
-# each token already carries a whole word.
+# Three things to see here:
+#
+# * The same "know nothing" model costs 10.80 nats **per token** but only
+#   3.78 bits **per character**, better than uniform over characters (6.60).
+#   The tokenizer itself carries knowledge: its 49k entries are common
+#   chunks of English, so even a uniform guess over them can only spell
+#   English-looking text. A token is about 4.1 characters here.
+# * Token unigram (5.97 nats/token) = 2.09 bits/char, half the character
+#   unigram's 4.40, with no context at all.
+# * Token **bigram**, one previous token, gets 1.39 bits/char: about the same
+#   as a 6-gram on characters (1.41). One token of context ≈ one word.
+#
+# Per token, these three look like 10.8, 6.0 and 4.0; per character, they
+# sit between the character n-grams. That's why the per-character unit
+# matters: the per-token numbers aren't comparable to anything else here.
 #
 # ## Real models on the same text
-
+#
+# Now neural networks. Pythia-70m (from lesson 05) at three checkpoints, and
+# SmolLM2-135M. Neither was trained on TinyStories, and they use different
+# tokenizers (Pythia: 50k tokens, SmolLM2: 49k), so bits per character is
+# the only fair way to compare them.
+#
 # %%
 def model_bpc(model, tokenizer, text=val_text, ctx=1024, max_tokens=200_000):
     ids = torch.tensor(tokenizer(text).input_ids[:max_tokens])
@@ -215,6 +257,29 @@ ax.set_title("The loss ladder: counting (blue) vs neural models (orange)")
 show_fig(fig, "06_ladder")
 
 # %% [markdown]
+# The ladder, top to bottom:
+#
+# | model | bits/char |
+# |---|---|
+# | uniform over 97 characters | 6.60 |
+# | best character n-gram (n=7–8) | 1.33 |
+# | token bigram | 1.39 |
+# | Pythia-70m, step 1,000 | 1.28 |
+# | Pythia-70m, step 8,000 | 0.99 |
+# | Pythia-70m, final (step 143,000) | 0.97 |
+# | SmolLM2-135M | 0.66 |
+#
+# Pythia at step 1,000, the moment copying switched on in lesson 05, is only
+# just better than the best lookup table. By step 8,000 it's well past it.
+# The remaining 135,000 steps buy only 0.02 bits/char *on this text*: simple
+# children's English is learned early; the rest of Pythia's training went
+# into things TinyStories doesn't test (code, science, rare facts).
+# SmolLM2, twice the size and trained on far more data (about 2T tokens vs
+# Pythia's 300B), gets 0.66: a perplexity of about 1.6 per *character*.
+#
+# Per token, these models read 3.61, 2.79, 2.73 and 1.87 nats. Lesson 11
+# trains our own model on TinyStories and places it on this ladder.
+#
 # ## Where is the loss?
 #
 # An average hides a lot. Look at SmolLM2's surprise on each token of one story.
@@ -234,20 +299,54 @@ print(f"  share of the story's total loss from its 10% hardest tokens: "
 R["story"] = {"tokens": toks, "loss": per_tok}
 
 # %% [markdown]
-# Most tokens are nearly free (the end of a word, "the" after "in", the
-# period at the end of a sentence). A few tokens carry most of the loss:
-# names, the first word of a new event, choices the story could have made
-# differently. **There's a floor**: some of this surprise can never go away,
-# because the story really could have gone another way. That irreducible
-# part is the *entropy of the text itself*. Training pushes loss towards it,
-# and never below.
+# This story averages 2.34 nats per token, above SmolLM2's 1.87 overall,
+# because it's scored from its first word with no context. The median token
+# costs 1.74 nats; only 5 of 70 tokens cost under 0.1.
+#
+# The expensive tokens are the ones nobody could predict: the name "Roxy"
+# (the "oxy" after "R" costs 10.1 nats, the worst in the story), "tried"
+# as the very first verb (9.7), "icy" (8.4), "named Billy" (6.0 and 5.5).
+# These are choices the story *could* have made differently.
+#
+# Now watch the same words come back. That's lesson 05's copying at work:
+#
+# | token | 1st time | 2nd | 3rd | 4th |
+# |---|---|---|---|---|
+# | "oxy" (in Roxy) | 10.1 | 0.09 | 0.00 | 0.00 |
+# | " R" (start of Roxy) | n/a | 7.35 | 1.57 | 0.32 |
+# | " icy" | 8.4 | 4.4 | | |
+# | " hill" | 2.24 | 0.06 | | |
+# | " Billy" | 5.5 | 1.00 | | |
+#
+# Once a name is in the context, it's nearly free. What stays expensive is
+# deciding *when* it comes back: " R" at the start of a sentence still cost
+# 7.35 the first time.
+#
+# Overall, the 10% hardest tokens hold 32% of the story's loss. **There's a
+# floor**: some of this surprise can never go away, because the story really
+# could have gone another way (Billy could have been a dog). That
+# irreducible part is the *entropy of the text itself*. Training pushes loss
+# towards it, and never below.
 #
 # **Aha:**
 # * Loss starts at log(vocab size), always.
 # * Counting gets you a long way, until it starts memorising instead of generalising.
 # * Compare models in **bits per character** (or per byte), never in loss per
 #   token across different tokenizers.
-# * Most of the loss sits in a few hard tokens, and part of it is irreducible.
+# * Most of the loss sits in a few hard tokens (new names, new events), and
+#   part of it is irreducible. Repeats are nearly free.
+#
+# ## What we know so far
+#
+# * Loss = average −log P(next token). Lower = the real text looked more likely.
+# * A model starts at ln(vocab) and has to beat counting to be worth anything:
+#   1.33 bits/char is what a lookup table of the last 7 characters gets.
+# * Neural models win because they generalise: Pythia at 0.97 and SmolLM2
+#   at 0.66 on text neither was trained on.
+#
+# Next question: the loss is one number, and the model has millions of
+# weights. **How does each weight know which way to move to lower it?**
+# That's the gradient, and lesson 07 computes one by hand.
 
 # %%
 R["ladder"] = ladder

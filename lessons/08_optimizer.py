@@ -11,6 +11,11 @@
 #
 # Questions: **what does Adam do differently? Can we write it in a few lines
 # and match PyTorch exactly? Why does it win, and what does it cost?**
+#
+# The plan: write four optimizers by hand and check them against
+# `torch.optim`; race them on a 2D valley where we can watch every step; race
+# them again on a real character model; then look inside the trained model at
+# how big the gradients and steps actually are.
 
 # %%
 import os, sys, copy
@@ -115,8 +120,11 @@ for name, ours_fn, ref_fn in (
 R["match"] = match_rows
 
 # %% [markdown]
-# Same numbers, up to float32 rounding. `torch.optim.AdamW` is a faster,
-# fused version of these ten lines.
+# Same numbers, up to float32 rounding (the largest weight difference is
+# 1.2e-7, one unit in the last place of a float32 near 1).
+# `torch.optim.AdamW` is a faster, fused version of these ten lines. When a
+# training recipe says "AdamW, β = (0.9, 0.95), weight decay 0.1", those are
+# the three knobs in `__init__` above, nothing more.
 #
 # ## A race in two dimensions
 #
@@ -160,13 +168,24 @@ ax.legend(); ax.set_title("60 steps on a narrow valley")
 show_fig(fig, "08_race2d")
 
 # %% [markdown]
+# After 60 steps from (−9, 2):
+#
+# | optimizer | where it is | loss |
+# |---|---|---|
+# | SGD (lr 0.18) | (−5.83, 0.00) | 0.68 |
+# | momentum (lr 0.04) | (−3.54, −0.04) | 0.26 |
+# | Adam (lr 0.5) | (−0.34, +0.05) | 0.013 |
+#
 # SGD has one learning rate for both directions, and the steep direction
 # sets the limit: above lr = 0.2 it overshoots across the valley and blows up.
-# At that speed it barely crawls along the gentle direction. Momentum builds
-# up speed along the valley, but slowly. Adam divides each direction's
-# gradient by its own typical size, so both directions move at the same pace,
-# and it gets close to the minimum in a few dozen steps. (Scale the valley
-# by any factor: Adam's path doesn't change at all, SGD's does.)
+# At lr 0.18 it bounces across the steep direction (y flips sign every step
+# while shrinking), settles it, and then barely crawls along the gentle one:
+# 3 units of progress in 60 steps. Momentum builds up speed along the valley,
+# but it overshoots across it too and needs time to calm down. Adam divides
+# each direction's gradient by its own typical size, so both directions move
+# at about the same pace (its first steps are exactly 0.5 in x *and* y), and
+# it gets close to the minimum in 60 steps. (Scale the valley by any factor:
+# Adam's path barely changes, SGD's does.)
 #
 # ## The real race: a character model on TinyStories
 #
@@ -217,6 +236,21 @@ ax.set_xlabel("step"); ax.set_ylabel("val loss (nats/char)"); ax.legend(); ax.se
 show_fig(fig, "08_race")
 
 # %% [markdown]
+# | optimizer | lr tried | best lr | final val loss |
+# |---|---|---|---|
+# | SGD | 0.01, 0.03, 0.1, 0.3 | 0.03 | 2.39 |
+# | SGD + momentum | 0.003, 0.01, 0.03, 0.1 | 0.01 | 2.05 |
+# | Adam | 3e-4, 1e-3, 3e-3, 1e-2 | 1e-3 | **1.16** |
+#
+# Not close. Momentum after 600 steps is about where Adam was after 100
+# (2.04). SGD at its *best* learning rate ends higher than that. And SGD's
+# two larger learning rates both end at ~3.06 nats, the unigram level from
+# lesson 06: it got stuck on "letter frequencies", the same failure lesson 09
+# will see for Adam at too-high learning rates.
+#
+# The sweep matters for fairness. With one shared learning rate, any
+# comparison mostly measures which optimizer that lr happens to suit.
+#
 # ## Why Adam wins
 #
 # Look at the gradients of the trained model: how big are they, tensor by
@@ -249,21 +283,26 @@ print(f"  embedding rows: common chars {[ctok.chars[i] for i in common.tolist()]
       f" rare chars {[ctok.chars[i] for i in rare]} {emb_g[rare].mean():.1e}")
 R["scales"] = {"per_tensor": scale_rows, "quantiles": qs.tolist(), "grad_q": gq.tolist(), "adam_q": uq.tolist(),
                "sgd_lr": best["SGD"]}
+R["emb_grad"] = {"common": [ctok.chars[i] for i in common.tolist()], "common_mean": emb_g[common].mean().item(),
+                 "rare": [ctok.chars[i] for i in rare], "rare_mean": emb_g[rare].mean().item()}
 
 # %% [markdown]
 # Two things to read here.
 #
 # **Size.** SGD's learning rate is capped by its *largest* gradients: any
-# higher and those weights overshoot and the run diverges (the sweep found the
-# limit). So a typical weight moves only ~lr × median gradient per step. Adam's
-# step is roughly `lr` for every weight, whatever the gradient's size, so the
-# typical weight moves an order of magnitude further per step while the run
-# stays stable.
+# higher and those weights overshoot (the sweep found the limit at 0.03). So
+# the median weight moves lr × median gradient = 0.03 × 2.7e-4 ≈ 8e-6 per
+# step. Adam's median step is 1.5e-4, about **18× further**, while the run
+# stays stable. Adam's step is `lr · m̂/√v̂`, at most about `lr` (here 1e-3);
+# the typical step is 0.15 × lr, because gradients that change sign from step
+# to step partly cancel in the running mean m̂.
 #
-# **Spread.** Gradients vary a lot from weight to weight. The embedding row of
-# a common character (space, "e") gets a gradient ~20× larger than a rare one
-# ("z", "W"), simply because it appears more often. Adam's steps are more even
-# (the ratio of big to small steps shrinks), so rare characters still learn.
+# **Spread.** Gradients vary a lot from weight to weight: the middle 90%
+# spans a factor of 77. Adam's steps span 38. The embedding rows show why
+# this matters. Rows of common characters (space, e, a, t, h) get a mean
+# gradient of 6.6e-3, rows of rare ones (N, C, z, -, W) 3.4e-4: **19×
+# smaller**, simply because they appear less often. With SGD, rare characters
+# would learn 19× slower. Adam's division by √v̂ evens that out.
 #
 # That's why Adam's learning rate means roughly the same thing across very
 # different models, and why it's the default for LLMs.
@@ -290,6 +329,18 @@ R["memory"] = {"params": n, "adam_state": state}
 # * The price is 2 extra numbers per weight. For fp32 training that's
 #   16 bytes per parameter before activations, which is why a 7B model
 #   needs ~112 GB to train but only 14 GB to run in bf16.
+#
+# ## What we know so far
+#
+# * The optimizer turns gradients into steps. Plain SGD uses one step size for
+#   all weights, and the steepest direction caps it.
+# * Adam gives each weight its own scale (√v̂) and smooths the direction (m̂).
+#   On our character model it beats SGD by 1.2 nats at the same step count.
+# * It costs two extra numbers per weight.
+#
+# Next question: Adam still has one knob, `lr`, and the sweep showed a run
+# can be ruined by a 3× change in it. **How sensitive is training to the
+# learning rate, and why does every recipe change it over time?**
 
 # %%
 save_result("08_optimizer", R)

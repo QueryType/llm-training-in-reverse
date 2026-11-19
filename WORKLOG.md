@@ -38,10 +38,10 @@ Handoff notes between working sessions. Not part of the course itself; delete be
 - [x] **Lessons 01–03 `.py`**: expand the markdown cells (more explanation, intuition, links between lessons)
 - [ ] **Lessons 04–14 + addendum `.py`**: review/expand markdown; make sure every stated number
       matches the latest results JSON (see "Key results" below; re-check them)
-      - [x] 04, 05 done (2026-11-18)   - [ ] 06–14, addendum
+      - [x] 04, 05 done (2026-11-18)   - [x] 06–09 done (2026-11-19)   - [ ] 10–14, addendum
 - [x] **Site Part 1**: expand 01–03 sections; write 04 (DPO) and 05 (Pythia) sections + widgets
-      (checked desktop + 390px) → **waiting for user feedback before Part 2**
-- [ ] **Site Part 2**: 06–09 sections + widgets
+      (checked desktop + 390px); user approved (2026-11-19)
+- [x] **Site Part 2**: 06–09 sections + widgets in `site/js/part2.js` (checked desktop + 390px)
 - [ ] **Site Part 3**: 10–14 sections + widgets; MLX addendum section
 - [ ] Update hero journey one-liners with measured facts; remove "soon" classes in the TOC
 - [ ] **README**: fill the lesson table (questions, what you do, aha with numbers), hardware timings, layout
@@ -76,8 +76,9 @@ Handoff notes between working sessions. Not part of the course itself; delete be
   (Llama's RMSNorm upcasts to float32!); fwd+bwd = 4.1× fwd on MPS (theory 3×)
 - 08: ours = torch.optim to ~1e-7; 2D valley: Adam 0.013, momentum 0.26, SGD 0.68; real race (best lr each):
   SGD 2.38, momentum 1.97, Adam 1.16; common-char embedding grads ~20× rare ones
-- 09: best constant lr 1e-3 (U-curve); warmup better on 3/3 seeds (~1.36→1.22); WSD trails at 80%, ends best (1.10);
-  clipping at 10× lr: 1.84→1.35; too-hot runs get *stuck* (~2.7), not spiky
+- 09: best constant lr 1e-3 (U-curve); warmup better on 3/3 seeds (~1.34→1.23); WSD trails at 80%, ends best (1.10);
+  clipping at 10× lr: 1.80→1.38; too-hot runs get *stuck* (2.58, 2.99 ≈ unigram 3.05), not spiky
+- 07 correction: the one-step gain on a *different* batch is as large as on the same batch (not smaller)
 - 10: TinyStories train 15.1% exact duplicates; 6,601 of 21,990 val stories also in train (removed);
   4096-vocab BPE: 4.00 chars/token vs SmolLM2's 49k: 4.14; 229M train tokens
 - 11: 12.2M params, 2,700 steps × 8,192 tokens, 12 min, val 1.922 nats = 0.693 bits/char (SmolLM2 0.657: close, not better);
@@ -95,6 +96,9 @@ Handoff notes between working sessions. Not part of the course itself; delete be
 - Half-width charts: pass `width: 460` to `xy()`/`chart()` or the text renders tiny.
 - Bar labels that are prose (not tokens): use `labelNode: [document.createTextNode(...)]`, else spaces show as `·`.
 - Lesson 02 now also saves share_tiny, median_w/median_d, embed/norm relative change (re-run done).
+- Lesson 08 now also saves `emb_grad` (common vs rare char embedding grads, 19×); re-run 2026-11-19
+  (momentum's best lr moved 0.03→0.01 on the re-run, MPS isn't bit-deterministic; prose reads the JSON).
+- Each part has its own JS file with its own `N` map and data-n fill at the end.
 
 ## Gotchas found along the way
 - Base tokenizer has no chat template; `chat_tokenizer()` borrows Instruct's. Our own SFT models use `our_chat_prompt` (no system prompt).
