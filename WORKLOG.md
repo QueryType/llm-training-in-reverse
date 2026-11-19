@@ -44,8 +44,9 @@ Handoff notes between working sessions. Not part of the course itself; delete be
 - [x] **Site Part 2**: 06–09 sections + widgets in `site/js/part2.js` (checked desktop + 390px)
 - [x] **Site Part 3**: 10–14 sections + MLX section in `site/js/part3.js` (checked desktop + 390px)
 - [x] Update hero journey one-liners with measured facts; remove "soon" classes in the TOC (MLX added to TOC)
-- [ ] **README**: fill the lesson table (questions, what you do, aha with numbers), hardware timings, layout
-- [ ] Final: rebuild site data, screenshot check (desktop + 390px), commit
+- [x] **README**: lesson table with measured ahas, hardware timings, layout, licenses
+- [x] Final: rebuild site data, screenshot check (desktop + 390px), every data-n key bound, commit (2026-11-19)
+- [ ] Before publishing: delete this WORKLOG.md; push to GitHub (user will do this)
 
 ### Widget ideas (from the original plan; data already saved)
 - 04: chosen/rejected pair viewer; Δlogp chosen vs rejected curves for both runs; length/test-loss evals
