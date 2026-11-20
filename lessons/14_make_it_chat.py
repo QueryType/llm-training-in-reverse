@@ -144,8 +144,11 @@ R["base_rate"], R["before"] = base_rate, before
 
 # %% [markdown]
 # 10,953 conversations fit in the 256-token window; 300 are held out for
-# testing. (We use the *validation* file of TinyStoriesInstruct: it's small,
-# and lesson 11 never trained on it, so none of these stories are memorised.)
+# testing. (We use the *validation* file of TinyStoriesInstruct because it's
+# small. It isn't fully separate from lesson 11's data: hashing shows that 412
+# of its 16,675 stories (2.5%) also appear word for word in TinyStories train.
+# Lesson 11 saw only 10% of its token stream, so it probably met few of them,
+# but by lesson 10's rules we should have removed them. That's the first Try.)
 #
 # Before SFT: requested words used **7%** (a random story from the data
 # scores 4%, so that's barely above chance), stops by itself **0%**.
@@ -302,6 +305,8 @@ save_result("14_make_it_chat", R)
 
 # %% [markdown]
 # ## Try:
+# * Decontaminate first, as lesson 10 did: drop the instruct stories whose hash
+#   appears in TinyStories train (412 of them). Do the scores change?
 # * Add lesson 04's DPO: sample two stories per request, prefer the one that uses
 #   more of the requested words. Does the words score go up further?
 # * Add a new instruction type the data supports: "Use this sentence: …" (the

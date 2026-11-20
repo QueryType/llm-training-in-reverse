@@ -229,9 +229,9 @@ R["finite_diff"] = fd_rows
 # norm. Autograd's chain rule through attention, RoPE, SwiGLU and RMSNorm is
 # right, and our check is good enough to see it.
 #
-# The RMSNorm detail is worth remembering. The first version of this check
-# failed, and the reason was Llama's norm quietly computing in float32 inside
-# a float64 model. Real training code is full of choices like this: where to
+# The RMSNorm detail is worth remembering. A naive version of this check
+# fails, because Llama's norm quietly computes in float32 inside a float64
+# model, and float32 rounding is bigger than the change a 1e-6 nudge makes. Real training code is full of choices like this: where to
 # keep extra precision so that rounding doesn't eat the signal (lesson 12
 # comes back to number formats).
 #
@@ -345,11 +345,14 @@ print("     activations around) don't shrink with the model the way the matrix m
 R["timing"] = {"device": device, "fwd_ms": tf * 1000, "fwd_bwd_ms": tb * 1000, "params": n_params(model)}
 
 # %% [markdown]
-# On this run (MPS, a 4.7M-parameter model), forward + backward took about
-# 4× a forward pass. Either way, the rule of thumb holds: a training step
-# costs roughly three forward passes' worth of arithmetic, which is where
-# lesson 13's "6 × parameters × tokens" comes from (2 for forward, 4 for
-# backward, per parameter per token).
+# On this run (MPS, a 4.7M-parameter model), forward + backward took 4.0×
+# a forward pass, so backward alone cost 3×. In theory backward is 2× the
+# forward (it computes gradients for both the weights and the inputs: two
+# matrix products for every one in the forward), so a whole step is 3
+# forward passes' worth of arithmetic. That's where lesson 13's
+# "6 × parameters × tokens" comes from (2 for forward, 4 for backward, per
+# parameter per token). Small models measure more than the theory, because
+# fixed costs like launching GPU kernels don't shrink with the model.
 
 # %%
 save_result("07_gradients", R)
@@ -361,8 +364,8 @@ save_result("07_gradients", R)
 #   exactly by backprop and checkable with finite differences.
 # * For a language model, it starts as `softmax − one_hot` at the output and
 #   flows backwards through every layer by the chain rule.
-# * Backward needs every activation from the forward pass and costs about
-#   twice the forward.
+# * Backward needs every activation from the forward pass. In theory it costs
+#   about twice the forward; on a small model we measured 3×.
 # * One step along −grad helps if it's small and hurts if it's big, and it
 #   helps other batches too.
 #

@@ -8,7 +8,7 @@
 # Every real LLM uses **subword tokens** made by **BPE** (byte-pair
 # encoding), the algorithm we take apart here. Then we prepare the data for
 # our own pretraining run (lesson 11): train a tokenizer, check the data, and
-# turn 2 million stories into one long stream of token ids.
+# turn a million stories into one long stream of token ids.
 #
 # Questions: **how does BPE decide what a token is? How big should the
 # vocabulary be? And what can go wrong with the data before training even
@@ -277,7 +277,8 @@ print("  " + "|".join(tk.decode([i]) if i != EOT else "⟨EOT⟩" for i in windo
 R["window"] = [tk.decode([i]) if i != EOT else "<|endoftext|>" for i in window]
 
 # %% [markdown]
-# 1M stories become 229M training tokens (about 229 per story) and the
+# 1M stories (of the 1.8M left after deduplication; `FULL=1` uses them all)
+# become 229M training tokens (about 229 per story) and the
 # cleaned validation set 3.3M tokens. Stored as `uint16` (4,096 < 65,536),
 # the training stream is 457 MB on disk, read with `np.memmap` so it never has
 # to fit in memory. In the window above, "…helping others." is followed by

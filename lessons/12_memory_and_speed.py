@@ -132,6 +132,12 @@ else:
 # outputs and MLP intermediate values until the backward pass needs them
 # (lesson 07). They grow with batch size and context length; the weights
 # don't.
+#
+# This is the training-side twin of the KV cache in *Transformers, Inside Out*
+# lesson 10. To generate, a model keeps one key and one value per layer per
+# token. To train, it keeps *everything* every layer computed, for every
+# token in the batch, until backward has used it. That's why training needs
+# far more memory than generating with the same model.
 
 # %%
 if R["stages"] is not None:

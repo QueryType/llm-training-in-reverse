@@ -122,7 +122,10 @@ results["delta_grid"] = {"kinds": KINDS, "grid": [[round(v, 4) for v in r] for r
 # and compare. We measure two things for each model: **perplexity** on a short
 # encyclopedia paragraph (lower = the text looks more familiar; perplexity is
 # exp of the average loss, and lesson 06 explains it properly) and its answer
-# to the France question inside the chat template.
+# to the France question inside the chat template. (If you did *Transformers,
+# Inside Out*: its lesson 11 measured SmolLM2's perplexity as 19.9 on a
+# different text. Perplexity depends on the text as much as on the model, so
+# only compare numbers measured on the same text.)
 
 # %%
 TEXT = ("The Eiffel Tower is a wrought-iron lattice tower on the Champ de Mars in Paris, France. "

@@ -1,7 +1,7 @@
 # %% [markdown]
 # # Lesson 06 — What does the loss number mean?
 #
-# Every lesson so far printed a "loss": 2.19 → 1.18 in lesson 03, 10.8 at
+# Every lesson so far printed a "loss": 2.19 → 1.18 in lesson 03, 11.0 at
 # Pythia's step 0 in lesson 05. Training is nothing more than pushing that
 # number down, so before we look at *how* it gets pushed (lessons 07–09) it's
 # worth knowing exactly what it measures, and what a good value looks like.
@@ -77,8 +77,10 @@ for nats in (10.8, 4.0, 2.0, 1.0):
 #
 # A model that knows nothing gives every token the same probability 1/V.
 # Its loss is −log(1/V) = **log V**, whatever the text. That's why every
-# freshly initialised model starts at ln(vocab size): Pythia's 10.8 in lesson
-# 05 is ln(50,304).
+# freshly initialised model starts *near* ln(vocab size), usually a little
+# above it: its random logits aren't perfectly flat, and any unevenness costs
+# extra. Pythia measured 11.01 at step 0 in lesson 05 (ln 50,304 = 10.83);
+# our own model in lesson 11 starts at 8.39 (ln 4,096 = 8.32).
 
 # %%
 ladder = []
@@ -329,7 +331,7 @@ R["story"] = {"tokens": toks, "loss": per_tok}
 # towards it, and never below.
 #
 # **Aha:**
-# * Loss starts at log(vocab size), always.
+# * Loss starts near log(vocab size), a little above it, for every model.
 # * Counting gets you a long way, until it starts memorising instead of generalising.
 # * Compare models in **bits per character** (or per byte), never in loss per
 #   token across different tokenizers.
@@ -339,7 +341,7 @@ R["story"] = {"tokens": toks, "loss": per_tok}
 # ## What we know so far
 #
 # * Loss = average −log P(next token). Lower = the real text looked more likely.
-# * A model starts at ln(vocab) and has to beat counting to be worth anything:
+# * A model starts near ln(vocab) and has to beat counting to be worth anything:
 #   1.33 bits/char is what a lookup table of the last 7 characters gets.
 # * Neural models win because they generalise: Pythia at 0.97 and SmolLM2
 #   at 0.66 on text neither was trained on.

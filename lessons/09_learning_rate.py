@@ -123,7 +123,9 @@ show_fig(fig, "09_sweep")
 # running averages start at zero), and the random model's gradients are
 # unusually large and chaotic. A full-size step right away can push the
 # model somewhere it never recovers from. **Warmup** ramps the lr up from ~0
-# over the first steps.
+# over the first steps. We test it where a hot start should hurt: at 3e-3,
+# 3× the best constant rate, with three seeds. (So compare these runs with
+# each other, not with the sweep's 1.16 at 1e-3.)
 
 # %%
 HOT = best_lr * 3          # a learning rate that's a bit too hot without help
@@ -157,11 +159,18 @@ R["warmup"] = {"lr": HOT, "steps": WARM, "runs": warm_rows}
 # while Adam's statistics are still empty, pushed the model to a worse
 # region it never fully left.
 #
+# A note on repeatability: seed 0 without warmup is the same run as the
+# sweep's 3e-3 point, yet it ends at 1.324 instead of 1.337. On MPS, some GPU
+# kernels don't add numbers in a fixed order, so "same seed, same result"
+# holds to about the second decimal. Differences smaller than that are not
+# findings.
+#
 # ## Decay: why end slow?
 #
 # Late in training, the noise of each batch's gradient matters more than
 # its direction: a big step mostly jumps around the minimum. Lowering the lr
-# lets the model settle into it. Four schedules, same peak lr, same warmup:
+# lets the model settle into it. Four schedules, same peak lr
+# (2e-3, twice the best constant rate), same warmup:
 #
 # * **constant**: never decays
 # * **cosine**: smooth decay to 10% of peak (the classic LLM schedule)
@@ -219,6 +228,10 @@ show_fig(fig, "09_schedules")
 # not from extra steps: the constant run, with the same steps, ends at 1.167.
 # That's why a run's "loss so far" before the decay is a pessimistic estimate
 # of where it will finish.
+#
+# Put the two experiments together: WSD at 2e-3 (1.102) beats the best
+# *constant* rate from the sweep (1.159 at 1e-3). The schedule was worth more
+# than the last factor of 3 in the learning-rate search.
 #
 # All three decaying schedules beat constant. Which decay is best depends on
 # the run length and isn't a big effect here (cosine vs linear: 0.004).

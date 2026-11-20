@@ -168,11 +168,16 @@ for q in QUESTIONS:
     print(f"  instruct -> {a['inst_chat']!r}")
 
 # %% [markdown]
-# Now the instruct model answers properly, and the base model falls apart:
+# Now the instruct model answers, and the base model falls apart:
 # a cave animal with no legs for "capital of France", run-together words for
 # the sleep question. It has rarely seen `<|im_start|>assistant` in its
 # training data, so after it the base model has no idea what text is likely.
 # Unusual input leads to unusual output.
+#
+# "Answers" is generous for the haiku, though: the instruct model writes a
+# run-on sentence about waves, not three lines of 5-7-5. Post-training gave it
+# the role, not every skill. At 135M parameters poetry is beyond it, and
+# lesson 03's own SFT runs into the same wall.
 #
 # Put the two experiments side by side:
 #
@@ -217,8 +222,9 @@ save_result("01_two_models", R)
 # its training data `<|im_end|>` almost never appears. The instruct model
 # stops after 94 and 78 tokens on two of the three questions and runs out of
 # room on the sleep tips (a long list). Stopping is a *learned* behaviour, and
-# a fragile one in a model this small; lesson 03 shows how little training it
-# takes to learn it, and lesson 14 measures it on our own model.
+# a fragile one in a model this small. Lesson 03 teaches it in 200 steps (the
+# result stops by itself on 100% of held-out prompts, counted in lesson 04),
+# and lesson 14 measures it on our own model.
 #
 # ## What we know so far
 #

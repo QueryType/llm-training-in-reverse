@@ -255,6 +255,11 @@ answers_after = show_answers(model, f"after {STEPS} steps of SFT ({train_s:.0f}s
 # * **Haiku**: fails. There are no poems in 2k everyday conversations, so it
 #   falls back to chit-chat and asks *you* a question about the ocean.
 #
+# And it **stops**. Lesson 01's base model never ended a turn; lesson 04
+# counts this checkpoint properly and finds it stops by itself on **100%**
+# of 48 held-out prompts. One graded `<|im_end|>` per assistant turn, 1,600
+# conversations, and the habit is learned.
+#
 # Note that 200 steps × 8 is 1,600 conversations: the model hasn't even
 # seen the whole training set once. And most of the drop happens in the first
 # 50 steps (test loss 2.19 → 1.26); the next 150 only take it to 1.18. Learning
@@ -269,6 +274,14 @@ answers_after = show_answers(model, f"after {STEPS} steps of SFT ({train_s:.0f}s
 # thousand examples and two minutes are enough for that, because (lesson 02)
 # the knowledge was already there. What it does add, it copies from the
 # data: the style, the openers, and the gaps.
+#
+# If you did *Transformers, Inside Out* lesson 13, you have trained a model
+# before: LoRA moved the Eiffel Tower to Rome in 4 seconds by training 1.8%
+# of the weights. This is the full-weight version of the same loop (LoRA SFT
+# is this loop with an adapter). Remember what that edit cost: the Statue of
+# Liberty moved to Rome too. Every edit spills over onto things you didn't
+# train. Lesson 02 measured a small spill for the real post-training
+# (perplexity 5.87 → 6.01); lesson 04 makes it big.
 #
 # ## What did masking do?
 #

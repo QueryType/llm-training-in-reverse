@@ -227,9 +227,12 @@ R["pytorch_tokens_per_s"] = pt_tps
 # | PyTorch (lesson 11) | 4.40 | 3.47 | 3.10 | 2.72 |
 # | MLX | 4.00 | 3.26 | 2.95 | 2.64 |
 #
-# Same batches, same schedule, same optimizer settings, and MLX is ahead
-# throughout, by less as training goes on. (The two use slightly different
-# validation samples, which explains a few hundredths, not 0.4.)
+# Same batches, same schedule, the same validation windows, and MLX is ahead
+# throughout, by less as training goes on. The optimizer is *almost* the same:
+# MLX's `optim.AdamW` differs from lesson 11's in two defaults. It skips
+# Adam's bias correction (`bias_correction=False`, the knob from lesson 08's
+# Try), and it applies weight decay to the norm weights too, which lesson 11
+# exempts. With a 100-step warmup, neither should matter much.
 
 # %%
 ids = tok("Once upon a time, there was a little").input_ids
@@ -252,9 +255,12 @@ save_result("mlx_addendum", R)
 #   schedule. The likely reason is initialisation: MLX's `nn.Linear` and
 #   `nn.Embedding` start from their own default random values, while
 #   Hugging Face's Llama draws every weight from N(0, 0.02). Same architecture,
-#   same recipe, different starting point, different run. (Check it below.)
+#   same recipe, different starting point, different run. (Check it below;
+#   the two optimizer defaults are the other suspects.)
 #
 # ## Try:
+# * Rule out the optimizer: pass `bias_correction=True` to `optim.AdamW` and
+#   exempt the norm weights from weight decay. Does the gap change?
 # * Initialise the MLX model like Hugging Face (every weight from
 #   `mx.random.normal(shape) * 0.02`, norms at 1) and train again. Does the gap close?
 # * Train in bf16: `model.set_dtype(mx.bfloat16)`. Faster? Does the loss suffer?

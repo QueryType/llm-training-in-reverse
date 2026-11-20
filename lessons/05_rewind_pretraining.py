@@ -142,11 +142,15 @@ for step in STEPS:
 #   That's a *unigram* model.
 # * **256–512 steps**: short phrases ("a little", "the first of"), repeated in loops.
 # * **512 → 1,000 steps**: copying switches on. The second copy of a passage
-#   suddenly becomes cheap. Grammar follows quickly.
+#   suddenly becomes cheap. Grammar follows quickly (judged by eye from the
+#   completions; there's no grammar probe).
 # * **after that**: facts, roughly in order of how often they appear in text.
 #   "United States of America" is there by step 1,000. "one, two, three, four"
-#   and "hydrogen and oxygen" creep up over the rest of training. "Paris" and
-#   "Obama" never really arrive: a 70M model is too small to store them.
+#   creeps up over the rest of training (5% → 25%); "hydrogen and oxygen"
+#   rises and falls (9% → 23% → 7% → 12%). "Paris" and "Obama" never really
+#   arrive: a 70M model is too small to store them. SmolLM2-135M, with twice
+#   the parameters and about 7× the tokens, answers Paris easily (lesson 01).
+#   What a model can store depends on both, which is lesson 13's question.
 #   And knowledge *flickers*: "America" is at 79% at step 4,000, 5% at step
 #   8,000, and back to 83% at step 16,000. A checkpoint is a snapshot of a
 #   process that is still moving.
@@ -218,6 +222,11 @@ show_fig(fig, "05_rewind")
 # A well-calibrated model would say "I don't know" (spread its probability
 # out) on random tokens. This one has learned to be very sure about what
 # comes next in real text, and it applies that confidence everywhere.
+#
+# Compare SmolLM2-135M: in *Transformers, Inside Out* lesson 07 it copied a
+# random token sequence it had seen once, from 12.8 nats down to 0.7. Final
+# Pythia-70m goes from 23.9 to 17.5 on a similar test. The bigger,
+# longer-trained model kept a skill the small one lost.
 #
 # ## What we know so far
 #

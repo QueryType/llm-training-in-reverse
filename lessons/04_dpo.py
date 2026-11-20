@@ -361,7 +361,7 @@ show_fig(fig, "04_dpo")
 # | SFT test loss | 1.18 | 1.29 | **3.75** (4.04 at step 120) |
 # | Δlogp chosen / rejected | 0 / 0 | −6 / −16 | **−36 / −133** |
 #
-# Our first draft of this lesson predicted the pulled-hard model would
+# You might expect the pulled-hard model to
 # ramble, repeat itself, or never stop. It doesn't. Its answers are not much
 # longer than the sensible run's, they stop, and they read well: "For a dog
 # that gets anxious during grooming, it's generally recommended to try to

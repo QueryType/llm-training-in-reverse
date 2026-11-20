@@ -273,18 +273,26 @@ R["final_bpc"] = final_bpc
 # * Its samples went through Pythia's stages: frequent words, then word
 #   salad with real words, then local phrases, then grammar, then story
 #   structure ("One day, ...").
-# * One stage is missing: the copy test barely improves (the second copy costs
-#   1.75 nats vs 1.92 for the first; final Pythia: 0.55 vs 4.99 on real text). TinyStories almost never repeats a
-#   passage, so there is little reward for learning to copy, while web text
-#   (Pythia's data) is full of repetition. **What a model learns depends on what
-#   its data rewards.**
+# * One stage has barely started: copying. The second copy of a passage costs
+#   1.75 nats vs 1.92 for the first; final Pythia gets 0.55 vs 4.99 on real
+#   text. This run can't tell us why, and there are two suspects:
+#   - **Too few tokens.** Pythia's copying switched on around 2B tokens; we
+#     trained on 22M, about 100× fewer. And our gap is still growing (0.02
+#     nats at step 300, 0.17 at step 2,700).
+#   - **The data.** TinyStories almost never repeats a whole passage, while
+#     web text is full of repetition. But it does repeat *names* (lesson 06's
+#     "Roxy" was free the second time), and our stories keep their names
+#     straight, which is a small kind of copying.
+#   The first and third Try below pull the two apart: train longer, or look
+#   for induction heads.
 #
 # ## What we know so far
 #
 # * The whole pipeline (tokenizer, data, Llama model, AdamW, warmup + cosine,
 #   clipping) fits in one script and trains a working base model in minutes.
 # * It learns in the same order Pythia did, compressed into 2,700 steps.
-# * Its abilities follow its data: stories yes, copying barely.
+# * Copying has barely started. Whether that's the data or the short run is
+#   an open question (see Try).
 #
 # Twelve minutes is short: the loss was still falling. Lesson 12 asks what
 # limits the speed and the size; lesson 13 asks whether a different size
@@ -296,7 +304,7 @@ save_result("11_pretrain", R)
 # %% [markdown]
 # ## Try:
 # * `STEPS=8000 python lessons/11_pretrain.py` (about 30 minutes). How much better
-#   do the stories get?
+#   do the stories get, and does the copy gap open up?
 # * Sample at temperature 0.3 and 1.2. Where does it repeat itself, where does it fall apart?
 # * Open the model with *Transformers, Inside Out*: `MODEL_ID=outputs/checkpoints/11_pretrain`
 #   works for the logit-lens and attention lessons (06, 07). Find your model's induction heads.
