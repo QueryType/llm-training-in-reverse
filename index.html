@@ -81,7 +81,7 @@
   <div class="grid2">
     <div class="prose">
       <h3 style="margin:0">How to use this page</h3>
-      <p>Each lesson matches a script in <code>lessons/</code>. Run it, and it saves its numbers; <code>python site/build_data.py</code> then puts them here. Nothing on this page is hand-typed, so if your run came out differently, the page shows <em>your</em> result.</p>
+      <p>Each lesson matches a script in <code>lessons/</code>. Run it, and it saves its numbers; <code>python site/build_data.py</code> then puts them here. The charts, and the numbers in the text that are filled from that data, show <em>your</em> run. The rest of the prose quotes the reference run on an M4 Pro, so expect small differences.</p>
       <p>Predict before you look. Training is full of surprises, and the surprises are the lesson.</p>
     </div>
     <div class="prose">
@@ -120,7 +120,7 @@
 
   <div class="col prose">
     <p>Three things stand out. The <strong>base model</strong> answers plain questions like a document would. For France it happens to continue with an answer (plus an invented population). For the haiku it writes <code>10) Write an essay on…</code>: to a base model, "Write a haiku about the sea." looks like item 9 on a homework sheet, so the likely next text is item 10. That isn't a bug. A base model was trained to answer one question, <em>what text comes next on a typical web page?</em>, and it answers it well.</p>
-    <p>The <strong>instruct model</strong> says nothing at all to a plain question. And inside the template the roles swap: the instruct model answers properly while the base model falls apart (a legless cave animal for "the capital of France"). Each model only works in the format it was trained on.</p>
+    <p>The <strong>instruct model</strong> says nothing at all to a plain question. And inside the template the roles swap: the instruct model answers while the base model falls apart (a legless cave animal for "the capital of France"). Each model only works in the format it was trained on. ("Answers" is generous for the haiku: it writes a run-on sentence about waves, not 5-7-5. Post-training gave it the role, not every skill.)</p>
     <p>Why does the instruct model stay silent? Because it has only ever seen questions inside a template, and in every one of them a user's message was followed by <code>&lt;|im_end|&gt;</code>. To it, a bare question looks like a user message that just ended, so the most likely next token is "end of turn". It isn't refusing; it's waiting for the template.</p>
   </div>
 
@@ -144,7 +144,7 @@
   <div class="bench panel">
     <div class="panel-title"><h4>Who knows when to stop?</h4><span class="hint">tokens written before <code>&lt;|im_end|&gt;</code>, chat template, up to 120</span></div>
     <div id="w01-stop"></div>
-    <p class="caption">The base model never stops: <code>&lt;|im_end|&gt;</code> almost never appeared in its training data. The instruct model stops on its own, except on the long list of sleep tips, where it runs out of room. Stopping is a learned habit, and lesson 03 shows how quickly it's learned.</p>
+    <p class="caption">The base model never stops: <code>&lt;|im_end|&gt;</code> almost never appeared in its training data. The instruct model stops on its own, except on the long list of sleep tips, where it runs out of room. Stopping is a learned habit. Lesson 03 teaches it in 200 steps: the result stops by itself on 100% of held-out prompts (counted in lesson 04).</p>
   </div>
 
   <div class="col">
@@ -181,7 +181,7 @@
   <div class="col prose">
     <p>The edit is <strong>dense</strong>: only <span data-n="02.tiny">7.3%</span> of the weights moved by less than 0.001. A typical weight is about <span data-n="02.medw">0.107</span> and a typical change about <span data-n="02.medd">0.010</span>, so almost every one of the 134.5 million numbers was nudged by roughly a tenth of its size. Post-training didn't find "the chat neurons" and rewrite them. It moved everything a little.</p>
     <p>Two patterns stand out in the map. <strong>Layer 0 moved most</strong>: its value projection by <span data-n="02.v0">33%</span>, the norm in front of it by <span data-n="02.n0">32%</span>. That's where tokens are first read, and the chat template is full of tokens the base model barely used. The token embeddings moved by <span data-n="02.embed">11.7%</span>, more than the average matrix, for the same reason. And <strong>queries and keys move more with depth</strong>, about 4–7% in the first layers and 11–12% in the last ones: late attention decides which earlier words to use for the next one, and a new role plausibly needs new choices there. (Plausibly: the map shows where, not why.)</p>
-    <p>Is a <span data-n="02.rel">8.6%</span> change big? That depends on its <em>direction</em>. To check, add a <strong>random</strong> change of exactly the same size to the base model, and compare the result with the real one. Perplexity on a paragraph of encyclopedia text tells us whether the model still "knows" ordinary text (lower is better; lesson 06 explains the unit).</p>
+    <p>Is a <span data-n="02.rel">8.6%</span> change big? That depends on its <em>direction</em>. To check, add a <strong>random</strong> change of exactly the same size to the base model, and compare the result with the real one. Perplexity on a paragraph of encyclopedia text tells us whether the model still "knows" ordinary text (lower is better; lesson 06 explains the unit). If you did <em>Transformers, Inside Out</em>, its lesson 11 measured 19.9 for SmolLM2 on a different text: perplexity depends on the text as much as on the model, so only compare numbers measured on the same text.</p>
   </div>
 
   <div class="bench grid2">
@@ -290,6 +290,8 @@
   <div class="col prose">
     <p>Before training, the base model writes the <em>user's</em> next message ("what is the best way to get rid of a bad smell in my house"): even inside the template it doesn't know which side it's on. After, it answers. France comes out right, a fact no training conversation taught; it was in the base model all along. The haiku fails, and the model asks you about the ocean instead.</p>
     <p>And the book question gets "Hello! How can I help you today?": polite, right role, no book. That exact sentence is the assistant's first reply in <strong>2,248 of the 2,260</strong> training conversations. SFT copies the habits of its data, good and bad.</p>
+    <p>And it <strong>stops</strong>. The base model never ended a turn in lesson 01; lesson 04 counts this checkpoint properly and finds it stops by itself on 100% of 48 held-out prompts. One graded <code>&lt;|im_end|&gt;</code> per assistant turn, 1,600 conversations, and the habit is learned.</p>
+    <p>If you did <em>Transformers, Inside Out</em> lesson 13, you have trained a model before: LoRA moved the Eiffel Tower to Rome in 4 seconds by training 1.8% of the weights. This is the full-weight version of the same loop. Remember what that edit cost: the Statue of Liberty moved to Rome too. Every edit spills over onto things you didn't train. Lesson 02 measured a small spill for the real post-training; lesson 04 makes it big.</p>
   </div>
 
   <div class="bench grid2">
@@ -393,7 +395,7 @@ loss      = −log σ( r(chosen) − r(rejected) )</div>
   </div>
 
   <div class="col prose">
-    <p>Our first draft of this lesson predicted the pulled-hard model would ramble, loop, or never stop. It doesn't. Its answers stop, read well, and aren't much longer than the sensible run's. Repetition barely moves. Every sample you'd read looks fine.</p>
+    <p>You might expect the pulled-hard model to ramble, loop, or never stop. It doesn't. Its answers stop, read well, and aren't much longer than the sensible run's. Repetition barely moves. Every sample you'd read looks fine.</p>
     <p>The damage is in the probabilities of everything the model <em>doesn't</em> say. Its test loss is now far worse than the base model's was before any SFT; its own chosen answers are much less likely than before training. It has moved into a narrow corner of its own while still winning on the training pairs. That's <strong>over-optimisation</strong>: it rarely shows in a handful of samples, and clearly shows in held-out measurements.</p>
     <p>Real preference data has the same length trap: human raters tend to prefer longer answers. It's one reason chat models are so wordy, and one reason β and the reference model matter.</p>
   </div>
@@ -447,8 +449,8 @@ loss      = −log σ( r(chosen) − r(rejected) )</div>
       <li><strong>Step 0:</strong> random weights. Random tokens out; loss a little above ln V.</li>
       <li><strong>Step 128:</strong> it has learned <em>which tokens are common</em>, and nothing else. It writes "the the the". The random model predicted <span data-n="05.v0">990</span> different top tokens; this one only <span data-n="05.v128">40</span>. Learning starts by <em>collapsing</em> onto the most common tokens.</li>
       <li><strong>256–512:</strong> short phrases ("a little", "the first of"), in loops.</li>
-      <li><strong>512 → 1,000:</strong> copying switches on, and grammar follows.</li>
-      <li><strong>After that:</strong> facts, slowly, roughly in order of how often they appear in text. "The United States of → America" is there by step 1,000. "Paris" never arrives: a 70M model is too small to store it, even after 300B tokens.</li>
+      <li><strong>512 → 1,000:</strong> copying switches on, and grammar follows (judged by eye from the completions; there's no grammar probe).</li>
+      <li><strong>After that:</strong> facts, slowly, roughly in order of how often they appear in text. "The United States of → America" is there by step 1,000. "Paris" never arrives: a 70M model is too small to store it, even after 300B tokens. SmolLM2-135M, with twice the parameters and about 7× the tokens, answers Paris easily (lesson 01). What a model can store depends on both, which is lesson 13's question.</li>
     </ul>
     <p>Two things about the facts are worth a second look. Knowledge <strong>flickers</strong>: "America" is at 79% at step 4,000, 5% at step 8,000, and back to 83% at 16,000. A checkpoint is a snapshot of a process that is still moving. And the France completion circles the answer without landing: "the capital of the capital" → "the capital of France, and the capital of France is…" → "the capital of the city of Paris" → back to "the capital of the country".</p>
   </div>
@@ -469,7 +471,7 @@ loss      = −log σ( r(chosen) − r(rejected) )</div>
   <div class="col prose">
     <p>Copying doesn't fade in. It appears between two neighbouring checkpoints: on real text, the second copy of a passage costs <span data-n="05.c512">6.5</span> nats at step 512 and <span data-n="05.c1k">2.0</span> at step 1,000. Nothing else on the page moves that much in one gap. This is the <em>induction head phase change</em> (Olsson et al., 2022): attention heads that look for "the last time this token appeared, and what came after it". <a href="https://querytype.github.io/transformers-inside-out/">Transformers, Inside Out</a> lesson 07 finds them inside a finished model.</p>
     <p>Most of the loss drop happens almost immediately. By step 1,000, 0.7% of training, the loss has fallen <span data-n="05.frac">85%</span> of the way from where it started to where it ends. The other 99.3% of the compute buys the last nat, and that's where the knowledge lives.</p>
-    <p><strong>A surprise:</strong> look at the dashed lines, copying <em>random</em> tokens (which can only be predicted by copying). It works best around steps 2,000–4,000 and then gets <strong>worse</strong>. By the end, even the first copy, which nobody can predict, costs more than twice the uniform guess: the model has become very sure about what comes next, and applies that confidence to noise too. Real-text copying stays fine. Don't assume more training improves every ability; measure the ones you care about.</p>
+    <p><strong>A surprise:</strong> look at the dashed lines, copying <em>random</em> tokens (which can only be predicted by copying). It works best around steps 2,000–4,000 and then gets <strong>worse</strong>. By the end, even the first copy, which nobody can predict, costs more than twice the uniform guess: the model has become very sure about what comes next, and applies that confidence to noise too. Real-text copying stays fine. Compare SmolLM2-135M: in <em>Transformers, Inside Out</em> lesson 07 it copied a random sequence it had seen once, from 12.8 nats down to 0.7; final Pythia-70m goes from 23.9 to 17.5. Don't assume more training improves every ability; measure the ones you care about.</p>
   </div>
 
   <div class="col">
@@ -494,7 +496,7 @@ loss      = −log σ( r(chosen) − r(rejected) )</div>
     <p class="question">What loss does a model get with no knowledge at all? With only counting? How do you compare models with different tokenizers, and how close are real models to perfect?</p>
   </div>
   <div class="col prose">
-    <p>Every lesson so far printed a loss: 2.19 → 1.18 in lesson 03, 10.8 at Pythia's step 0 in lesson 05. Training is nothing more than pushing that number down, so before we look at <em>how</em> it gets pushed (lessons 07–09), it's worth knowing exactly what it measures.</p>
+    <p>Every lesson so far printed a loss: 2.19 → 1.18 in lesson 03, 11.0 at Pythia's step 0 in lesson 05. Training is nothing more than pushing that number down, so before we look at <em>how</em> it gets pushed (lessons 07–09), it's worth knowing exactly what it measures.</p>
     <div class="formula">loss = average over tokens of  −log P(the real next token)</div>
     <p>It's the model's <strong>average surprise</strong>. Probability 1 costs nothing; ½ costs 0.69 nats (1 bit); 1/1000 costs 6.9. Why a logarithm? Because the probabilities of a whole text <em>multiply</em>, P(token 1) · P(token 2 | token 1) · …, and the log turns that product into a sum. So a lower loss simply means the real text looked more likely to the model.</p>
   </div>
@@ -509,7 +511,7 @@ loss      = −log σ( r(chosen) − r(rejected) )</div>
 
   <div class="col prose">
     <h3>The ladder</h3>
-    <p>To see what a loss value is worth, score many models on the same text: TinyStories' validation set (children's stories, the data Part 3 pretrains on). Start from <strong>knowing nothing</strong>: equal probability for every one of its 97 characters, which costs log₂ 97 = <span data-n="06.uni">6.60</span> bits per character whatever the text. Every freshly initialised model starts here, at ln(vocab size) nats: that's Pythia's 10.8 in lesson 05.</p>
+    <p>To see what a loss value is worth, score many models on the same text: TinyStories' validation set (children's stories, the data Part 3 pretrains on). Start from <strong>knowing nothing</strong>: equal probability for every one of its 97 characters, which costs log₂ 97 = <span data-n="06.uni">6.60</span> bits per character whatever the text. Over tokens, the same idea gives ln(vocab size) nats, and every freshly initialised model starts near it, a little above (its random logits aren't perfectly flat): Pythia measured 11.0 at step 0 against ln V = 10.8, and our own model in lesson 11 starts at 8.39 against 8.32.</p>
     <p>Then <strong>just count</strong>. An <em>n-gram</em> model predicts the next character from counts of what followed the previous n−1 characters in 53.5 million characters of training stories. No neural network, no gradient: a lookup table. Then real neural models, all in one unit: bits per character.</p>
   </div>
 
@@ -548,7 +550,7 @@ loss      = −log σ( r(chosen) − r(rejected) )</div>
     <div class="keys">
       <p class="label">Takeaways</p>
       <ul>
-        <li>Loss = average −log P(next token). It starts at ln(vocab) for every model.</li>
+        <li>Loss = average −log P(next token). Every model starts near ln(vocab), a little above it.</li>
         <li>Counting gets to 1.33 bits/char, then starts memorising instead of generalising. Neural networks win by generalising.</li>
         <li>Compare models in bits per character (or byte), never in loss per token across tokenizers.</li>
         <li>Most of the loss sits in a few hard tokens; repeats are nearly free; some of it is irreducible. Next: how does each weight know which way to move to lower it?</li>
@@ -600,7 +602,7 @@ loss      = −log σ( r(chosen) − r(rejected) )</div>
   </div>
 
   <div class="col prose">
-    <p>The first version of that check failed. The reason: Llama's RMSNorm quietly computes in float32 even inside a float64 model, and float32 rounding (≈1e-7) is larger than the change a 1e-6 nudge makes. Computing the norms in float64 for the check fixed it. Real training code is full of choices like this, about where to keep extra precision so that rounding doesn't eat the signal.</p>
+    <p>A naive version of that check fails. The reason: Llama's RMSNorm quietly computes in float32 even inside a float64 model, and float32 rounding (≈1e-7) is larger than the change a 1e-6 nudge makes. Computing the norms in float64 for the check fixed it. Real training code is full of choices like this, about where to keep extra precision so that rounding doesn't eat the signal.</p>
     <h3>What does one step do?</h3>
     <p>The gradient says which way is downhill right here. Take one step of size η against it, <code>w ← w − η·grad</code>, on a 4-layer character model, and measure the loss again: on the batch the gradient came from, and on a different batch. The dashed line is what the gradient <em>promises</em>: a drop of η·‖grad‖² if the slope stayed the same all the way.</p>
   </div>
@@ -623,7 +625,7 @@ loss      = −log σ( r(chosen) − r(rejected) )</div>
       <ul>
         <li><code>p.grad</code> is the slope of the loss along one weight, computed exactly by backprop and checkable by finite differences.</li>
         <li>For a language model it starts as softmax − one_hot and flows back through every layer by the chain rule.</li>
-        <li>Backward needs every activation from the forward pass and costs about twice the forward.</li>
+        <li>Backward needs every activation from the forward pass. In theory it costs about twice the forward; on a small model we measured 3×.</li>
         <li>One step along −grad helps if small, hurts if big, and helps other batches too. Next: plain −grad isn't what anyone uses. What does Adam do?</li>
       </ul>
     </div>
@@ -750,7 +752,7 @@ m̂, v̂ = m/(1 − β1ᵗ), v/(1 − β2ᵗ)   <span class="c"># undo the bias 
     <p>A U-shape with a narrow bottom at <span data-n="09.best">1e-3</span>. Too cold, and the model learns steadily but slowly. Too hot, and the loss drops for a few dozen steps and then <strong>stops</strong>: the two hottest runs end at <span data-n="09.hot1">2.58</span> and <span data-n="09.hot2">2.99</span>, around the letter-frequency level. They didn't blow up or spike (only the hottest run had any jump over 0.5 nats). Each step just keeps kicking the model out of anything finer than letter counts. A stuck run looks calm, and can be mistaken for a converged one; only the sweep tells you.</p>
     <p>Near the bottom, a 3× change costs 0.09–0.18 nats. Two steps away it costs 0.45 on the cold side and 1.0 on the hot side: too hot is much worse than too cold.</p>
     <h3>Warmup: why start slow?</h3>
-    <p>At step 0, Adam's running averages are empty and the random model's gradients are large and chaotic. A full-size step right away can push the model somewhere it never fully recovers from. <strong>Warmup</strong> ramps the learning rate up from almost 0 over the first steps (60 here). Test it at 3× the best rate, with three seeds:</p>
+    <p>At step 0, Adam's running averages are empty and the random model's gradients are large and chaotic. A full-size step right away can push the model somewhere it never fully recovers from. <strong>Warmup</strong> ramps the learning rate up from almost 0 over the first steps (60 here). Test it at 3e-3, 3× the best constant rate, with three seeds (so compare these runs with each other, not with the sweep's 1.16):</p>
   </div>
 
   <div class="bench panel">
@@ -760,12 +762,12 @@ m̂, v̂ = m/(1 − β1ᵗ), v/(1 − β2ᵗ)   <span class="c"># undo the bias 
       <div id="w09-warm"></div>
       <div class="bars wide" id="w09-warmbars" style="align-content:center"></div>
     </div>
-    <p class="caption">At step 50 the two runs are about level. The damage of a hot start isn't a blow-up you can see early; it's a model that ends worse.</p>
+    <p class="caption">At step 50 the two runs are about level. The damage of a hot start isn't a blow-up you can see early; it's a model that ends worse. (Seed 0 without warmup is the same run as the sweep's 3e-3 point, yet ends at 1.324 instead of 1.337: on MPS, "same seed, same result" holds to about the second decimal.)</p>
   </div>
 
   <div class="col prose">
     <h3>Decay: why end slow?</h3>
-    <p>Late in training, the noise in each batch's gradient matters more than its direction: a full-size step mostly jumps around the minimum. Lowering the learning rate lets the model settle into it. Four schedules, same peak, same warmup: <strong>constant</strong>; <strong>cosine</strong> and <strong>linear</strong> decay to 10% of the peak; and <strong>WSD</strong> (warmup-stable-decay), constant until the last 20%, then a quick decay. Many recent models use WSD because you can stop or extend training at any point before the decay.</p>
+    <p>Late in training, the noise in each batch's gradient matters more than its direction: a full-size step mostly jumps around the minimum. Lowering the learning rate lets the model settle into it. Four schedules, same peak (2e-3), same warmup: <strong>constant</strong>; <strong>cosine</strong> and <strong>linear</strong> decay to 10% of the peak; and <strong>WSD</strong> (warmup-stable-decay), constant until the last 20%, then a quick decay. Many recent models use WSD because you can stop or extend training at any point before the decay.</p>
   </div>
 
   <div class="bench grid2">
@@ -780,7 +782,7 @@ m̂, v̂ = m/(1 − β1ᵗ), v/(1 − β2ᵗ)   <span class="c"># undo the bias 
   </div>
 
   <div class="col prose">
-    <p>Until step 480, WSD <em>is</em> the constant run: same learning rate, same numbers, and it trails cosine. Then it decays, and in the last 100 steps it drops from <span data-n="09.wsd500">1.19</span> to <span data-n="09.wsd">1.10</span>, past everything else. The constant run, with exactly the same steps, ends at <span data-n="09.const">1.17</span>. <strong>The drop at the end comes from the decay itself</strong>, not from extra steps, so a run's loss before its decay is a pessimistic estimate of where it will finish.</p>
+    <p>Until step 480, WSD <em>is</em> the constant run: same learning rate, same numbers, and it trails cosine. Then it decays, and in the last 100 steps it drops from <span data-n="09.wsd500">1.19</span> to <span data-n="09.wsd">1.10</span>, past everything else. The constant run, with exactly the same steps, ends at <span data-n="09.const">1.17</span>. <strong>The drop at the end comes from the decay itself</strong>, not from extra steps, so a run's loss before its decay is a pessimistic estimate of where it will finish. And WSD at 2e-3 beats the best <em>constant</em> rate from the sweep (1.16 at 1e-3): the schedule was worth more than the last factor of 3 in the learning-rate search.</p>
     <h3>Clipping: a seat belt</h3>
     <p>Sometimes one batch produces a huge gradient. <strong>Gradient clipping</strong> rescales the whole gradient whenever its norm exceeds a limit (1.0 is the usual choice), so no single step can be enormous. Test it at 10× the best learning rate, with warmup:</p>
   </div>
@@ -913,7 +915,7 @@ m̂, v̂ = m/(1 − β1ᵗ), v/(1 − β2ᵗ)   <span class="c"># undo the bias 
 
   <div class="col prose">
     <p>Scrub left to right and it's lesson 05 again, compressed into 2,700 steps: random tokens → frequent words ("too and to, a to.") → real words in salad → phrases ("One day, …") → sentences → story shape. It's fast here, a recognisable story by step 300 (2.5M tokens), because TinyStories is a tiny, regular world. Most of the loss drop is early again: by step 500 the loss has fallen <span data-n="11.frac">88%</span> of the way.</p>
-    <p>One stage is missing. The copy test barely moves: the second copy of a passage costs <span data-n="11.c2">1.75</span> nats against <span data-n="11.c1">1.92</span> for the first, where final Pythia gets 0.55 against 4.99. TinyStories almost never repeats a passage, so there's little reward for learning to copy. <strong>What a model learns depends on what its data rewards.</strong></p>
+    <p>One stage has barely started. The copy test barely moves: the second copy of a passage costs <span data-n="11.c2">1.75</span> nats against <span data-n="11.c1">1.92</span> for the first, where final Pythia gets 0.55 against 4.99. This run can't tell us why. One suspect is <strong>too few tokens</strong>: Pythia's copying switched on around 2B tokens, and we trained on 22M, about 100× fewer; our gap is still growing (0.02 nats at step 300, 0.17 at the end). The other is <strong>the data</strong>: TinyStories almost never repeats a whole passage, while web text is full of repetition. But it does repeat names (lesson 06's "Roxy"), and our stories keep theirs straight. The lesson's Tries pull the two apart: train longer, or look for induction heads.</p>
   </div>
 
   <div class="bench grid2">
@@ -939,7 +941,7 @@ m̂, v̂ = m/(1 − β1ᵗ), v/(1 − β2ᵗ)   <span class="c"># undo the bias 
       <ul>
         <li>The whole pipeline fits in one script and trains a working base model in minutes.</li>
         <li>It learns in the same order Pythia did: frequencies → words → phrases → grammar → story structure.</li>
-        <li>Specialists go far on their own turf, and they learn what their data rewards (stories yes, copying barely).</li>
+        <li>Specialists go far on their own turf. Copying has barely started, and whether that's the data or the short run is left open.</li>
         <li>The loss was still falling. Next: what limits speed and size, and was 12M the right size?</li>
       </ul>
     </div>
@@ -971,6 +973,7 @@ m̂, v̂ = m/(1 − β1ᵗ), v/(1 − β2ᵗ)   <span class="c"># undo the bias 
 
   <div class="col prose">
     <p><strong>Activations dominate</strong>: <span data-n="12.actx">41</span>× the weights at the peak of the forward pass. Every layer keeps its inputs, attention outputs and MLP intermediates until backward needs them (lesson 07), and they grow exactly in proportion to the batch. <strong>Activation checkpointing</strong> keeps only each layer's input and recomputes the rest during backward: <span data-n="12.ck">8.2</span>× less activation memory, for <span data-n="12.ckslow">1.31</span>× the time.</p>
+    <p>This is the training-side twin of the KV cache in <em>Transformers, Inside Out</em> lesson 10. To generate, a model keeps one key and one value per layer per token. To train, it keeps <em>everything</em> every layer computed, for every token in the batch, until backward has used it.</p>
     <h3>Speed</h3>
   </div>
 
@@ -1069,7 +1072,7 @@ m̂, v̂ = m/(1 − β1ᵗ), v/(1 − β2ᵗ)   <span class="c"># undo the bias 
   </div>
   <div class="col prose">
     <p>The tape has run all the way back and forward again. In lesson 03 we made someone else's base model an assistant. Now we do the same to <strong>our own</strong> model from lesson 11, born in this course from random weights.</p>
-    <p>It only knows children's stories, so its "chat" is a story writer that takes requests: <em>"Write a story that uses the words dog, ball and happy. Include dialogue."</em> The data is TinyStoriesInstruct, where every story comes with the words and features it was written from: <span data-n="14.ntrain">10,953</span> one-turn conversations for training. That gives us something lesson 03 didn't have, <strong>a way to check whether the instruction was followed</strong>: does the story use the words, does it have dialogue when asked, and does the model end its turn by itself?</p>
+    <p>It only knows children's stories, so its "chat" is a story writer that takes requests: <em>"Write a story that uses the words dog, ball and happy. Include dialogue."</em> The data is TinyStoriesInstruct, where every story comes with the words and features it was written from: <span data-n="14.ntrain">10,953</span> one-turn conversations for training. (One caveat that lesson 10 would flag: 412 of its 16,675 stories, 2.5%, also appear word for word in TinyStories train. Lesson 11 saw only 10% of its stream, so few were likely seen; decontaminating is the lesson's first Try.) That gives us something lesson 03 didn't have, <strong>a way to check whether the instruction was followed</strong>: does the story use the words, does it have dialogue when asked, and does the model end its turn by itself?</p>
     <p>The recipe is lesson 03's, unchanged: same chat template, same masking (only the story and <code>&lt;|im_end|&gt;</code> are graded), same loop. 600 steps of 16 conversations.</p>
   </div>
 
@@ -1139,7 +1142,7 @@ m̂, v̂ = m/(1 − β1ᵗ), v/(1 − β2ᵗ)   <span class="c"># undo the bias 
 
   <div class="col prose">
     <p>Loaded with lesson 11's weights, the MLX model computes the same function: the largest logit difference is <span data-n="mlx.diff">2.5e−5</span>, with the same top prediction at every position. Porting is mostly renaming; the weights are just arrays. Training from scratch, MLX runs <span data-n="mlx.speed">1.23</span>× faster than PyTorch on MPS: lazy evaluation and <code>mx.compile</code> fuse the whole step, which matters most for small models where per-operation costs dominate (lesson 12).</p>
-    <p>And MLX's run sits <em>lower</em> at every step, by less as training goes on. Same batches, same schedule, same optimizer settings. The likely reason is initialisation: MLX's layers start from their own default random values, while Hugging Face's Llama draws every weight from N(0, 0.02). That's a hypothesis, not a measurement; the addendum's first <strong>Try</strong> tests it.</p>
+    <p>And MLX's run sits <em>lower</em> at every step, by less as training goes on. Same batches, same schedule, same validation windows. The optimizer is <em>almost</em> the same: MLX's AdamW skips Adam's bias correction by default (the knob from lesson 08's Try) and decays the norm weights too, but with a 100-step warmup neither should matter much. The likely reason is initialisation: MLX's layers start from their own default random values, while Hugging Face's Llama draws every weight from N(0, 0.02). That's a hypothesis, not a measurement; the addendum's Tries test it and the optimizer defaults.</p>
   </div>
 </section>
 
